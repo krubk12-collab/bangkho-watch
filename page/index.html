@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>สถานะเว็บบางโค</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anuphan:wght@600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F2F4F1; --surface:#FFFFFF; --sunk:#E8ECE7; --ink:#16201C; --muted:#56625C; --line:#D5DBD4;
+  --bar:#3E6B5A; --ref:#B86E0A;
+  --ok:#1D7A4C; --ok-bg:#DDEFE4; --warn:#9A5B00; --warn-bg:#F6EAD2; --bad:#B3402B; --bad-bg:#F7E3DE;
+  --f-display:"Anuphan","IBM Plex Sans Thai",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#111614; --surface:#18201D; --sunk:#1F2825; --ink:#E4EAE6; --muted:#9AA7A0; --line:#2C3632;
+    --bar:#6FAE94; --ref:#E3A043;
+    --ok:#6CCB98; --ok-bg:#1B3327; --warn:#E6B25C; --warn-bg:#352A16; --bad:#EE8A73; --bad-bg:#3A221D;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--f-body);padding-inline:18px;padding-block:28px 56px}
+.wrap{max-width:980px;margin-inline:auto;display:flex;flex-direction:column;gap:28px}
+h1,h2{font-family:var(--f-display);margin:0;line-height:1.25;text-wrap:balance}
+h1{font-size:clamp(24px,4vw,32px)}
+h2{font-size:17px}
+.mono,code{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;justify-content:space-between}
+.pill{display:inline-flex;align-items:center;gap:8px;font-weight:600;border-radius:999px;padding:6px 14px;font-size:14px}
+.pill::before{content:"";width:9px;height:9px;border-radius:50%;background:currentColor}
+.ok{background:var(--ok-bg);color:var(--ok)} .warn{background:var(--warn-bg);color:var(--warn)} .bad{background:var(--bad-bg);color:var(--bad)}
+.stale{font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+.tile .label{font-size:13px;color:var(--muted)}
+.tile .big{font-family:var(--f-mono);font-size:26px;font-weight:500;line-height:1.1}
+.tile .sub{font-size:13px;color:var(--muted)}
+.meter{height:8px;border-radius:4px;background:var(--sunk);overflow:hidden}
+.meter i{display:block;height:100%;border-radius:4px;background:var(--ok)}
+section{display:flex;flex-direction:column;gap:10px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+td,th{padding:8px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:12.5px;color:var(--muted);font-weight:600;background:var(--sunk)}
+tr:last-child td{border-bottom:0}
+td.num{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+td.path{font-family:var(--f-mono);font-size:13px;word-break:break-all}
+.chart{padding:14px 12px 6px}
+.chart svg{display:block;width:100%;height:auto}
+.chart text{fill:var(--muted);font-family:var(--f-mono);font-size:10px}
+.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.check{display:flex;justify-content:space-between;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13.5px}
+.check b{font-family:var(--f-mono);font-weight:500}
+.errors{border:1px solid var(--warn);background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:10px 14px;font-size:14px}
+footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>สถานะเว็บบางโค</h1>
+      <div class="muted stale" id="updated">กำลังโหลด…</div>
+    </div>
+    <span class="pill warn" id="overall">กำลังตรวจ</span>
+  </header>
+  <div class="errors" id="errors" hidden></div>
+
+  <div class="tiles">
+    <div class="tile"><span class="label">แบนด์วิดท์เดือนนี้ (ยอดสรุปจากโฮสต์ วันละครั้ง)</span><span class="big" id="mUsed">–</span><div class="meter"><i id="mBar" style="width:0"></i></div><span class="sub" id="mSub"></span></div>
+    <div class="tile"><span class="label">วันนี้ทั้งเว็บ (สด) · เป้าไม่เกิน 1 GB</span><span class="big" id="dUsed">–</span><div class="meter"><i id="dBar" style="width:0"></i></div><span class="sub" id="dSub"></span></div>
+    <div class="tile"><span class="label">10 นาทีล่าสุด</span><span class="big" id="tUsed">–</span><span class="sub" id="tSub"></span></div>
+    <div class="tile"><span class="label">พื้นที่ดิสก์โฮสต์</span><span class="big" id="disk">–</span><div class="meter"><i id="diskBar" style="width:0"></i></div><span class="sub" id="diskSub"></span></div>
+  </div>
+
+  <section>
+    <h2>หน้าเว็บที่ตรวจทุกรอบ</h2>
+    <div class="checks" id="checks"></div>
+  </section>
+
+  <section>
+    <h2>แบนด์วิดท์รายชั่วโมง 48 ชั่วโมงล่าสุด</h2>
+    <div class="panel chart" id="chart"></div>
+  </section>
+
+  <section>
+    <h2>ไฟล์ที่ใช้แบนด์วิดท์มากที่สุดใน 1 ชั่วโมงล่าสุด</h2>
+    <div class="panel"><table><thead><tr><th>ไฟล์</th><th style="text-align:right">ครั้ง</th><th style="text-align:right">ปริมาณ</th></tr></thead><tbody id="files"></tbody></table></div>
+  </section>
+
+  <section>
+    <h2>การเตือนล่าสุด</h2>
+    <div class="panel"><table><thead><tr><th style="width:9.5em">เวลา</th><th>ข้อความ</th></tr></thead><tbody id="alerts"></tbody></table></div>
+  </section>
+
+  <footer>ตรวจอัตโนมัติทุก 10 นาทีด้วย GitHub Actions (อาจช้ากว่ากำหนดบ้าง) · หน้านี้อยู่นอกโฮสต์ของโรงเรียน จึงเปิดได้แม้ bangkho.ac.th ล่ม · เกินเกณฑ์จะแจ้งเข้า LINE · IP ถูกปิดบังบางส่วน</footer>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const MB = 1e6;
+const fmt = b => b >= 1e9 ? (b/1e9).toFixed(2) + " GB" : (b/MB).toFixed(1) + " MB";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const tone = p => p >= 90 ? "var(--bad)" : p >= 70 ? "var(--warn)" : "var(--ok)";
+function thaiTime(iso){ const d = new Date(iso); return d.toLocaleString("th-TH",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit",timeZone:"Asia/Bangkok"}); }
+
+function render(s){
+  const ageMin = (Date.now() - new Date(s.updated)) / 60000;
+  $("updated").textContent = `ตรวจล่าสุด ${thaiTime(s.updated)} น.` + (ageMin > 30 ? ` · ⚠️ ข้อมูลเก่า ${Math.round(ageMin)} นาที ตัวเฝ้าอาจหยุดทำงาน` : "");
+  const down = (s.checks||[]).filter(c => !c.ok);
+  const pct = s.month?.pct;
+  const ov = $("overall");
+  if (down.length){ ov.className = "pill bad"; ov.textContent = down.some(c => c.note === "ถูกระงับบัญชี") ? "โฮสต์ระงับบัญชี" : `ใช้ไม่ได้ ${down.length} หน้า`; }
+  else if ((pct ?? 0) >= 90 || (s.today?.bytes ?? 0) > 1e9 || ageMin > 30){ ov.className = "pill warn"; ov.textContent = "ต้องจับตา"; }
+  else { ov.className = "pill ok"; ov.textContent = "ปกติ"; }
+
+  if (s.errors?.length){ $("errors").hidden = false; $("errors").textContent = s.errors.join(" · "); }
+
+  if (s.month){
+    const m = s.month;
+    $("mUsed").textContent = (m.used_mb/1024).toFixed(1) + " GB";
+    $("mSub").textContent = m.limit_mb ? `${m.pct}% ของเพดาน ${(m.limit_mb/1024).toFixed(0)} GB` : "ไม่จำกัด";
+    $("mBar").style.width = Math.min(pct ?? 0, 100) + "%"; $("mBar").style.background = tone(pct ?? 0);
+    const dp = m.disk_limit_mb ? m.disk_mb / m.disk_limit_mb * 100 : 0;
+    $("disk").textContent = (m.disk_mb/1024).toFixed(1) + " GB";
+    $("diskSub").textContent = m.disk_limit_mb ? `${dp.toFixed(0)}% ของ ${(m.disk_limit_mb/1024).toFixed(0)} GB` : "";
+    $("diskBar").style.width = Math.min(dp, 100) + "%"; $("diskBar").style.background = tone(dp);
+  }
+  if (s.today){
+    const p = s.today.bytes / 1e9 * 100;
+    $("dUsed").textContent = fmt(s.today.bytes);
+    $("dSub").textContent = `${s.today.req.toLocaleString("th-TH")} คำขอ · ${p.toFixed(0)}% ของเป้า`;
+    $("dBar").style.width = Math.min(p, 100) + "%"; $("dBar").style.background = tone(p);
+  }
+  if (s.last10){ $("tUsed").textContent = fmt(s.last10.bytes); $("tSub").textContent = `${s.last10.req.toLocaleString("th-TH")} คำขอ · เตือนเมื่อเกิน ${s.limits.burst10_mb} MB`; }
+
+  $("checks").innerHTML = (s.checks||[]).map(c =>
+    `<div class="check"><span class="mono">${esc(c.path)}</span><b style="color:${c.ok ? "var(--ok)" : "var(--bad)"}">${c.ok ? c.ms + " ms" : esc(c.note || c.code || "ล่ม")}</b></div>`).join("");
+
+  const files = s.last60?.files || [];
+  $("files").innerHTML = files.length ? files.map(f =>
+    `<tr><td class="path">${esc(f.path)}</td><td class="num">${f.req.toLocaleString("th-TH")}</td><td class="num">${fmt(f.bytes)}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="muted">ยังไม่มีข้อมูล</td></tr>`;
+
+  const al = s.alerts || [];
+  $("alerts").innerHTML = al.length ? al.map(a => `<tr><td class="mono">${thaiTime(a.t)}</td><td>${esc(a.text)}</td></tr>`).join("")
+    : `<tr><td colspan="2" class="muted">ยังไม่มีการเตือน</td></tr>`;
+
+  drawChart(s.hours || []);
+}
+
+function drawChart(hours){
+  if (!hours.length){ $("chart").innerHTML = `<p class="muted" style="margin:0 4px">ยังไม่มีข้อมูล</p>`; return; }
+  const W = 900, H = 200, L = 52, R = 8, T = 10, B = 26;
+  const refMB = 1000 / 24;                                   // เป้า 1 GB/วัน ≈ 42 MB/ชั่วโมง
+  const maxMB = Math.max(refMB * 1.5, ...hours.map(h => h.bytes / MB));
+  const nice = [50,100,200,500,1000,2000,5000,10000,20000,50000,100000].find(v => v >= maxMB) || Math.ceil(maxMB);
+  const y = v => T + (H - T - B) * (1 - v / nice);
+  const bw = (W - L - R) / hours.length;
+  let g = "";
+  [0, nice/2, nice].forEach(v => {
+    g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/>`;
+    g += `<text x="${L-6}" y="${y(v)+3}" text-anchor="end">${v >= 1000 ? (v/1000)+" GB" : v+" MB"}</text>`;
+  });
+  hours.forEach((h, i) => {
+    const v = h.bytes / MB, x = L + i * bw;
+    g += `<rect x="${x+1}" y="${y(v)}" width="${Math.max(bw-2,1)}" height="${Math.max(y(0)-y(v),0)}" rx="1.5" fill="${v > refMB*5 ? "var(--bad)" : "var(--bar)"}"><title>${h.h.slice(8,10)}/${h.h.slice(5,7)} ${h.h.slice(11)}:00 · ${v.toFixed(1)} MB</title></rect>`;
+    if (h.h.endsWith("T00") || i === 0) g += `<text x="${x}" y="${H-8}">${h.h.slice(8,10)}/${h.h.slice(5,7)}</text>`;
+  });
+  g += `<line x1="${L}" x2="${W-R}" y1="${y(refMB)}" y2="${y(refMB)}" stroke="var(--ref)" stroke-dasharray="4 4"/>`;
+  g += `<text x="${W-R}" y="${y(refMB)-4}" text-anchor="end" style="fill:var(--ref)">เป้า 1 GB/วัน ≈ 42 MB/ชม.</text>`;
+  $("chart").innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="กราฟแบนด์วิดท์รายชั่วโมง">${g}</svg>`;
+}
+
+async function load(){
+  try { const r = await fetch("status.json?t=" + Date.now()); render(await r.json()); }
+  catch(e){ $("updated").textContent = "โหลดข้อมูลสถานะไม่ได้"; }
+}
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>

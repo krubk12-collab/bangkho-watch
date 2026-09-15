@@ -1,0 +1,39 @@
+name: watch
+on:
+  schedule:
+    - cron: "*/10 * * * *"     # GitHub อาจเลื่อนช้าไปบ้างช่วงคนใช้เยอะ
+  workflow_dispatch:
+concurrency:
+  group: watch
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: load previous state
+        run: |
+          mkdir -p site
+          if git fetch --depth=1 origin status 2>/dev/null; then
+            git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
+          fi
+      - name: check
+        env:
+          DA_USER: ${{ secrets.DA_USER }}
+          DA_PASS: ${{ secrets.DA_PASS }}
+          LINE_NOTIFY_URL: ${{ secrets.LINE_NOTIFY_URL }}
+          LINE_NOTIFY_KEY: ${{ secrets.LINE_NOTIFY_KEY }}
+          OUT_DIR: site
+        run: python watch.py
+      - name: publish status page
+        run: |
+          cp page/index.html site/index.html
+          touch site/.nojekyll
+          cd site
+          git init -q -b status
+          git add -A
+          git -c user.name=bangkho-watch -c user.email=actions@users.noreply.github.com commit -qm "status"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" status
