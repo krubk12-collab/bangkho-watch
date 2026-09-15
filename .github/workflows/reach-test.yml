@@ -1,0 +1,11 @@
+name: reach-test
+on: workflow_dispatch
+jobs:
+  t:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -s -o /dev/null -w "site %{http_code} %{time_total}s\n" --max-time 20 https://bangkho.ac.th/ || echo "site FAIL"
+          curl -s -o /dev/null -w "home %{http_code}\n" --max-time 20 https://bangkho.ac.th/home/ || echo "home FAIL"
+          curl -s -o /dev/null -w "directadmin %{http_code}\n" --max-time 20 https://ns105.hostinglotus.net:2222/CMD_API_SHOW_USER_USAGE || echo "directadmin FAIL"
+          curl -s -o /dev/null -w "ftp-port %{http_code}\n" --max-time 20 ftp://119.59.120.21:2002/ || echo "ftp FAIL (expected 530/67 without login)"
