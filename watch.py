@@ -34,10 +34,22 @@ PHP_SYS = {
     "order":  {"name": "สั่งวัสดุห้องเรียน", "min": {"catalog.json": 1}},   # catalog เป็น object ซ้อนหมวด ไม่ใช่ list สินค้า
     "gpf":    {"name": "สัญญาณกองทุน กบข.", "min": {}},                      # ไม่มี data/ ดึงราคาสดจาก yahoo.php
     "home":   {"name": "หน้าแรกโรงเรียน", "min": {"config.json": 5}},
+    "qr":     {"name": "DinoQR สร้าง QR", "min": {}},
+    "test69": {"name": "แบบทดสอบ O-NET", "min": {}},
 }
 # ระบบที่เป็นเปลือกครอบ GAS — ดึง URL /exec จากหน้าเปลือกเอง (redeploy แล้ว URL เปลี่ยน ห้าม hardcode)
 GAS_SYS = {"check": "ระบบเช็คชื่อ", "dd": "ของหายได้คืน", "cer": "เกียรติบัตร",
-           "dayoff": "ระบบลา", "result": "ผลนิเทศ", "booking": "จองห้อง"}
+           "dayoff": "ระบบลา", "result": "ผลนิเทศ", "booking": "จองห้อง",
+           "scan": "BK DocScan สแกนเอกสาร", "sup": "ตารางสอน & นิเทศ"}
+# ระบบที่หน้าเว็บกับท่อข้อมูลอยู่คนละที่ (ไม่มีเปลือกบนโฮสต์ให้ดึง URL) — ระบุตรง ๆ
+LINK_SYS = {
+    "time": {"name": "ภาพรวมการสอนปัจจุบัน", "site": SITE + "/time/",
+             "pipe": "https://docs.google.com/spreadsheets/d/14ZyWxubxyrpJN3GGN8YE8llP6ynZHHMOHyzrh3v6sng/gviz/tq?tqx=out:csv",
+             "pipe_name": "ตารางสอนใน Google Sheets", "least": 1000},
+    "cardscan": {"name": "สแกนการ์ดตอบ", "site": "https://krubk12-collab.github.io/bklive-cardscan/",
+                 "pipe": "https://script.google.com/macros/s/AKfycbwTID5HorZf1_V3llzh7fpcd_oW96XTQVAvBYPZ1byHu0wyZFTGL8CFA8B5lk9STfku/exec",
+                 "pipe_name": "หลังบ้าน GAS", "expect": "ready"},
+}
 EXEC_RE = re.compile(r"https://script\.google\.com/(?:a/macros/[\w.-]+|macros)/s/[\w-]{40,}/exec")
 GAS_BAD = ["Script function not found", "Exception:", "TypeError:", "ReferenceError:",
            "Authorization is required", "Sorry, unable to open the file",
@@ -97,21 +109,34 @@ def check_site():
     return out
 
 
+def fetch(url, timeout=30):
+    """ยิง URL คืน (code, body) — แอปหลายตัวตอบ 404/403 พร้อมเนื้อหาจริง จึงไม่ถือว่าล้มเหลวทันที"""
+    try:
+        return http(url, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except Exception as e:
+        return 0, f"เชื่อมต่อไม่ได้ ({type(e).__name__})".encode()
+
+
+def site_up(url):
+    """หน้าเว็บของระบบยังเปิดได้ไหม (ใช้แยก 🔴 เข้าไม่ได้เลย ออกจาก 🟡 เข้าได้แต่ท่อมีปัญหา)"""
+    code, body = fetch(url, timeout=25)
+    return 0 < code < 400 and b"has been suspended" not in body[:3000]
+
+
 def probe_php(slug, cfg):
     """ยิง /{slug}/health.php แล้วตรวจว่าไฟล์ข้อมูลหลักยังครบและยังเขียนได้"""
-    r = {"sys": slug, "name": cfg["name"], "kind": "php", "ok": False, "detail": "", "cid": None}
+    r = {"sys": slug, "name": cfg["name"], "kind": "php", "url": f"{SITE}/{slug}/",
+         "pipe_name": "ข้อมูลในระบบ", "ok": False, "site": True, "detail": "", "cid": None}
     t0 = time.time()
+    code, body = fetch(f"{SITE}/{slug}/health.php", timeout=25)
     try:
-        code, body = http(f"{SITE}/{slug}/health.php", timeout=25)
         h = json.loads(body)
-    except urllib.error.HTTPError as e:
-        r["detail"] = "ยังไม่ได้ติดตั้ง health.php" if e.code == 404 else f"HTTP {e.code}"
-        return r
     except ValueError:
-        r["detail"] = "คำตอบไม่ใช่ JSON (หน้าเว็บอาจถูกแทรกอย่างอื่น)"
-        return r
-    except Exception as e:
-        r["detail"] = f"เชื่อมต่อไม่ได้ ({type(e).__name__})"
+        r["site"] = site_up(r["url"])                    # หน้าเว็บยังอยู่ไหม → ตัดสินว่าเหลืองหรือแดง
+        r["detail"] = ("ยังไม่ได้ติดตั้ง health.php" if code == 404 else
+                       body.decode("utf-8", "ignore")[:60] if code == 0 else f"ประตูตรวจตอบ HTTP {code}")
         return r
 
     r["ms"] = round((time.time() - t0) * 1000)
@@ -136,27 +161,22 @@ def probe_php(slug, cfg):
 
 def probe_gas(slug, name):
     """เปลือกบนโฮสต์ → หา URL /exec ในหน้า → ยิง exec จริง ดูว่า GAS ยังตอบ ไม่ใช่หน้า error"""
-    r = {"sys": slug, "name": name, "kind": "gas", "ok": False, "detail": ""}
+    r = {"sys": slug, "name": name, "kind": "gas", "url": f"{SITE}/{slug}/",
+         "pipe_name": "หลังบ้าน Google Apps Script", "ok": False, "site": True, "detail": ""}
     t0 = time.time()
-    try:
-        code, body = http(f"{SITE}/{slug}/", timeout=25)
-    except Exception as e:
-        r["detail"] = f"เปลือกบนโฮสต์เปิดไม่ได้ ({getattr(e, 'code', type(e).__name__)})"
+    code, body = fetch(r["url"], timeout=25)
+    if not (0 < code < 400):
+        r["site"] = False
+        r["detail"] = f"หน้าเว็บเปิดไม่ได้ ({code or body.decode('utf-8', 'ignore')[:40]})"
         return r
     m = EXEC_RE.search(body.decode("utf-8", "ignore"))
     if not m:
         r["detail"] = "ไม่พบลิงก์ /exec ในหน้าเปลือก"
         return r
-    try:
-        code, body = http(m.group(0), timeout=40)
-    except urllib.error.HTTPError as e:
-        # GAS ตอบ 404 เองได้เมื่อแอปไม่รู้จักหน้าที่ขอ (เช่น /result/ ต้องมี ?page=) — ดูเนื้อหาต่อว่า script ยังทำงาน
-        code, body = e.code, e.read()
-        if not body:
-            r["detail"] = f"เรียก GAS ไม่ได้ (HTTP {e.code})"
-            return r
-    except Exception as e:
-        r["detail"] = f"เรียก GAS ไม่ได้ ({type(e).__name__})"
+    # GAS ตอบ 404 เองได้เมื่อแอปไม่รู้จักหน้าที่ขอ (เช่น /result/ ต้องมี ?page=) — ดูเนื้อหาต่อว่า script ยังทำงาน
+    code, body = fetch(m.group(0), timeout=40)
+    if not body:
+        r["detail"] = f"เรียก GAS ไม่ได้ (HTTP {code})" if code else "เรียก GAS ไม่ได้"
         return r
     text = body.decode("utf-8", "ignore")[:4000]
     hit = next((b for b in GAS_BAD if b in text), None)
@@ -176,8 +196,35 @@ def probe_gas(slug, name):
     return r
 
 
+def probe_link(slug, cfg):
+    """ระบบที่หน้าเว็บกับท่อข้อมูลคนละที่ — เช็คหน้าเว็บกับท่อแยกกัน"""
+    r = {"sys": slug, "name": cfg["name"], "kind": "link", "url": cfg["site"],
+         "pipe_name": cfg["pipe_name"], "ok": False, "site": True, "detail": ""}
+    t0 = time.time()
+    if not site_up(cfg["site"]):
+        r["site"] = False
+        r["detail"] = "หน้าเว็บเปิดไม่ได้"
+        return r
+    code, body = fetch(cfg["pipe"], timeout=40)
+    r["ms"] = round((time.time() - t0) * 1000)
+    text = body.decode("utf-8", "ignore")[:4000]
+    if not body or not (0 < code < 400):
+        r["detail"] = f'{cfg["pipe_name"]}ไม่ตอบ (HTTP {code})' if code else f'{cfg["pipe_name"]}เรียกไม่ได้'
+    elif next((b for b in GAS_BAD if b in text), None):
+        r["detail"] = f'{cfg["pipe_name"]}ตอบผิดปกติ'
+    elif cfg.get("expect") and cfg["expect"] not in text:
+        r["detail"] = f'{cfg["pipe_name"]}ตอบไม่ตรงที่ควรเป็น'
+    elif len(body) < cfg.get("least", 1):
+        r["detail"] = f'{cfg["pipe_name"]}ตอบข้อมูลน้อยผิดปกติ ({len(body)} ไบต์)'
+    else:
+        r["ok"] = True
+    return r
+
+
 def probe_all(state):
-    systems = [probe_php(s, c) for s, c in PHP_SYS.items()] + [probe_gas(s, n) for s, n in GAS_SYS.items()]
+    systems = ([probe_php(s, c) for s, c in PHP_SYS.items()]
+               + [probe_gas(s, n) for s, n in GAS_SYS.items()]
+               + [probe_link(s, c) for s, c in LINK_SYS.items()])
     # client_id ล็อกอินต้องเป็นตัวเดียวกันทั้งพอร์ต — ตัวไหนหลุดไปจากพวกคือ config เพี้ยน
     cids = Counter(s["cid"] for s in systems if s.get("cid"))
     if cids:
@@ -186,13 +233,17 @@ def probe_all(state):
             if s.get("cid") and s["cid"] != main_cid:
                 s["ok"] = False
                 s["detail"] = (s["detail"] + " · " if s["detail"] else "") + f"client_id ล็อกอินไม่ตรงกับระบบอื่น ({s['cid']})"
+    # ไฟ 3 สี: 🟢 เว็บเข้าได้และท่อใช้งานได้ · 🟡 เว็บเข้าได้แต่ท่อมีปัญหา · 🔴 เว็บเข้าไม่ได้เลย
     was = state.setdefault("sys_ok", {})
     for s in systems:
+        s["level"] = "ok" if s["ok"] else "warn" if s.get("site") else "down"
         prev = was.get(s["sys"])
-        if not s["ok"]:
-            alert(state, f'sys:{s["sys"]}', f'🔧 {s["name"]} (/{s["sys"]}/) มีปัญหา — {s["detail"] or "เช็คไม่ผ่าน"}', 6)
+        if s["level"] == "down":
+            alert(state, f'sys:{s["sys"]}', f'🔴 {s["name"]} — เข้าเว็บไม่ได้เลย ({s["detail"] or "ไม่ตอบ"})', 6)
+        elif s["level"] == "warn":
+            alert(state, f'sys:{s["sys"]}', f'🟡 {s["name"]} — เว็บเข้าได้ แต่{s.get("pipe_name", "ท่อ")}มีปัญหา: {s["detail"] or "เช็คไม่ผ่าน"}', 6)
         elif prev is False:
-            send_line(f'✅ {s["name"]} (/{s["sys"]}/) กลับมาปกติแล้ว\n{PAGE_URL}')
+            send_line(f'🟢 {s["name"]} กลับมาปกติแล้ว\n{PAGE_URL}')
             state.get("sent", {}).pop(f'sys:{s["sys"]}', None)
         was[s["sys"]] = s["ok"]
     return systems
