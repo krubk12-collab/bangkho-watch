@@ -80,6 +80,14 @@ footer{font-size:13px;color:var(--muted);border-top:1px solid var(--line);paddin
   </div>
 
   <section>
+    <h2>ระบบและท่อเชื่อมต่อ <span class="muted" style="font-weight:400;font-size:14px" id="sysCount"></span></h2>
+    <div class="panel"><table>
+      <thead><tr><th>ระบบ</th><th>ข้อมูลในระบบ</th><th style="width:9em">อัปเดตล่าสุด</th><th style="width:7em;text-align:right">สถานะ</th></tr></thead>
+      <tbody id="systems"><tr><td colspan="4" class="muted">กำลังโหลด…</td></tr></tbody>
+    </table></div>
+  </section>
+
+  <section>
     <h2>หน้าเว็บที่ตรวจทุกรอบ</h2>
     <div class="checks" id="checks"></div>
   </section>
@@ -115,7 +123,9 @@ function render(s){
   const down = (s.checks||[]).filter(c => !c.ok);
   const pct = s.month?.pct;
   const ov = $("overall");
+  const badSys = (s.systems || []).filter(x => !x.ok);
   if (down.length){ ov.className = "pill bad"; ov.textContent = down.some(c => c.note === "ถูกระงับบัญชี") ? "โฮสต์ระงับบัญชี" : `ใช้ไม่ได้ ${down.length} หน้า`; }
+  else if (badSys.length){ ov.className = "pill bad"; ov.textContent = `${badSys.length} ระบบมีปัญหา`; }
   else if ((pct ?? 0) >= 90 || (s.today?.bytes ?? 0) > 1e9 || ageMin > 30){ ov.className = "pill warn"; ov.textContent = "ต้องจับตา"; }
   else { ov.className = "pill ok"; ov.textContent = "ปกติ"; }
 
@@ -138,6 +148,20 @@ function render(s){
     $("dBar").style.width = Math.min(p, 100) + "%"; $("dBar").style.background = tone(p);
   }
   if (s.last10){ $("tUsed").textContent = fmt(s.last10.bytes); $("tSub").textContent = `${s.last10.req.toLocaleString("th-TH")} คำขอ · เตือนเมื่อเกิน ${s.limits.burst10_mb} MB`; }
+
+  const sys = s.systems || [];
+  const sick = sys.filter(x => !x.ok);
+  $("sysCount").textContent = sys.length ? (sick.length ? `· ${sick.length} ใน ${sys.length} ระบบมีปัญหา` : `· ปกติทั้ง ${sys.length} ระบบ`) : "";
+  $("systems").innerHTML = sys.length ? sys.map(x => {
+    const counts = Object.entries(x.counts || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([f, n]) => `${esc(f.replace(/\.jsonl?$/, ""))} ${n.toLocaleString("th-TH")}`).join(" · ");
+    const info = x.ok ? (counts || (x.kind === "gas" ? "เชื่อม Google Apps Script ได้" : "—")) : esc(x.detail || "เช็คไม่ผ่าน");
+    return `<tr><td><a href="https://bangkho.ac.th/${esc(x.sys)}/" target="_blank" rel="noopener">${esc(x.name)}</a>
+      <span class="muted mono" style="font-size:12.5px">/${esc(x.sys)}/</span></td>
+      <td style="${x.ok ? "" : "color:var(--bad)"}">${info}</td>
+      <td class="mono" style="font-size:12.5px">${x.newest ? esc(x.newest.slice(5)) : "—"}</td>
+      <td class="num" style="color:${x.ok ? "var(--ok)" : "var(--bad)"}">${x.ok ? (x.ms ? x.ms + " ms" : "ปกติ") : "มีปัญหา"}</td></tr>`;
+  }).join("") : `<tr><td colspan="4" class="muted">ยังไม่มีข้อมูล</td></tr>`;
 
   $("checks").innerHTML = (s.checks||[]).map(c =>
     `<div class="check"><span class="mono">${esc(c.path)}</span><b style="color:${c.ok ? "var(--ok)" : "var(--bad)"}">${c.ok ? c.ms + " ms" : esc(c.note || c.code || "ล่ม")}</b></div>`).join("");

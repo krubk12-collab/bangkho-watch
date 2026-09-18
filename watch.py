@@ -22,6 +22,27 @@ PAGE_URL = "https://krubk12-collab.github.io/bangkho-watch/"
 CHECK_PATHS = ["/", "/home/", "/behave/", "/keep/", "/photo/", "/check/", "/sos/"]
 MB = 1_000_000
 
+# ตรวจ "ท่อ" ของแต่ละระบบ (ชิ้นที่ 2, 18 ก.ย.69) — ยิงประตู health.php ที่วางไว้ในแต่ละระบบ
+# min = ไฟล์ข้อมูลหลักต้องมีอย่างน้อยกี่ record (จับทะเบียนหาย/ถูกเขียนทับ) · fresh_h = ข้อมูลใหม่สุดต้องไม่เก่ากว่ากี่ชั่วโมง
+PHP_SYS = {
+    # ตัวเลขเกณฑ์ = ประมาณ 70-80% ของค่าจริงวันที่ติดตั้ง (18 ก.ย.69) เผื่อลบข้อมูลตามปกติ แต่จับ "หายฮวบ" ได้
+    "behave": {"name": "พลังวินัยบางโค", "min": {"students.json": 500, "parents.json": 500, "rules.json": 10}},
+    "photo":  {"name": "บางโค Photo", "min": {"albums.json": 1}},
+    "keep":   {"name": "บางโค Keep", "min": {"items.json": 150, "cats.json": 5}},
+    "log":    {"name": "สถิติเข้าชมเว็บ", "fresh_h": 24},
+    "size":   {"name": "เช็คเสื้อกีฬาสี", "min": {"2569.json": 150}},
+    "order":  {"name": "สั่งวัสดุห้องเรียน", "min": {"catalog.json": 1}},   # catalog เป็น object ซ้อนหมวด ไม่ใช่ list สินค้า
+    "gpf":    {"name": "สัญญาณกองทุน กบข.", "min": {}},                      # ไม่มี data/ ดึงราคาสดจาก yahoo.php
+    "home":   {"name": "หน้าแรกโรงเรียน", "min": {"config.json": 5}},
+}
+# ระบบที่เป็นเปลือกครอบ GAS — ดึง URL /exec จากหน้าเปลือกเอง (redeploy แล้ว URL เปลี่ยน ห้าม hardcode)
+GAS_SYS = {"check": "ระบบเช็คชื่อ", "dd": "ของหายได้คืน", "cer": "เกียรติบัตร",
+           "dayoff": "ระบบลา", "result": "ผลนิเทศ", "booking": "จองห้อง"}
+EXEC_RE = re.compile(r"https://script\.google\.com/(?:a/macros/[\w.-]+|macros)/s/[\w-]{40,}/exec")
+GAS_BAD = ["Script function not found", "Exception:", "TypeError:", "ReferenceError:",
+           "Authorization is required", "Sorry, unable to open the file",
+           "Service invoked too many times", "Exceeded maximum execution time"]
+
 # เกณฑ์เตือน — ลูกพี่ตั้งเป้าทั้งเว็บไม่เกิน 1 GB/วัน (15 ก.ย.69)
 LIMITS = {
     "burst10_mb": 100,       # ทั้งเว็บใน 10 นาที
@@ -74,6 +95,107 @@ def check_site():
         out.append({"path": p, "code": code, "ms": round((time.time() - t0) * 1000),
                     "ok": 0 < code < 400 and not note, "note": note})
     return out
+
+
+def probe_php(slug, cfg):
+    """ยิง /{slug}/health.php แล้วตรวจว่าไฟล์ข้อมูลหลักยังครบและยังเขียนได้"""
+    r = {"sys": slug, "name": cfg["name"], "kind": "php", "ok": False, "detail": "", "cid": None}
+    t0 = time.time()
+    try:
+        code, body = http(f"{SITE}/{slug}/health.php", timeout=25)
+        h = json.loads(body)
+    except urllib.error.HTTPError as e:
+        r["detail"] = "ยังไม่ได้ติดตั้ง health.php" if e.code == 404 else f"HTTP {e.code}"
+        return r
+    except ValueError:
+        r["detail"] = "คำตอบไม่ใช่ JSON (หน้าเว็บอาจถูกแทรกอย่างอื่น)"
+        return r
+    except Exception as e:
+        r["detail"] = f"เชื่อมต่อไม่ได้ ({type(e).__name__})"
+        return r
+
+    r["ms"] = round((time.time() - t0) * 1000)
+    r["cid"] = (h.get("login") or {}).get("client_id")
+    d = h.get("data") or {}
+    r["files"], r["newest"], r["age_h"] = d.get("files"), d.get("newest"), d.get("age_h")
+    r["counts"] = {f["f"]: f["n"] for f in d.get("top", []) if f.get("n") is not None}
+
+    problems = list(h.get("note") or []) if not h.get("ok") else []
+    for fname, least in (cfg.get("min") or {}).items():
+        n = r["counts"].get(fname)
+        if n is None:
+            problems.append(f"ไม่พบไฟล์ {fname}")
+        elif n < least:
+            problems.append(f"{fname} เหลือ {n} รายการ (ควรมีอย่างน้อย {least})")
+    if cfg.get("fresh_h") and r["age_h"] is not None and r["age_h"] > cfg["fresh_h"]:
+        problems.append(f"ไม่มีข้อมูลใหม่มา {r['age_h']:.0f} ชม. — ท่อบันทึกอาจตัน")
+    r["ok"] = not problems
+    r["detail"] = " · ".join(problems)
+    return r
+
+
+def probe_gas(slug, name):
+    """เปลือกบนโฮสต์ → หา URL /exec ในหน้า → ยิง exec จริง ดูว่า GAS ยังตอบ ไม่ใช่หน้า error"""
+    r = {"sys": slug, "name": name, "kind": "gas", "ok": False, "detail": ""}
+    t0 = time.time()
+    try:
+        code, body = http(f"{SITE}/{slug}/", timeout=25)
+    except Exception as e:
+        r["detail"] = f"เปลือกบนโฮสต์เปิดไม่ได้ ({getattr(e, 'code', type(e).__name__)})"
+        return r
+    m = EXEC_RE.search(body.decode("utf-8", "ignore"))
+    if not m:
+        r["detail"] = "ไม่พบลิงก์ /exec ในหน้าเปลือก"
+        return r
+    try:
+        code, body = http(m.group(0), timeout=40)
+    except urllib.error.HTTPError as e:
+        # GAS ตอบ 404 เองได้เมื่อแอปไม่รู้จักหน้าที่ขอ (เช่น /result/ ต้องมี ?page=) — ดูเนื้อหาต่อว่า script ยังทำงาน
+        code, body = e.code, e.read()
+        if not body:
+            r["detail"] = f"เรียก GAS ไม่ได้ (HTTP {e.code})"
+            return r
+    except Exception as e:
+        r["detail"] = f"เรียก GAS ไม่ได้ ({type(e).__name__})"
+        return r
+    text = body.decode("utf-8", "ignore")[:4000]
+    hit = next((b for b in GAS_BAD if b in text), None)
+    r["ms"] = round((time.time() - t0) * 1000)
+    if hit:
+        r["detail"] = f"GAS ตอบผิดปกติ: {hit}"
+    elif "Sign in - Google Accounts" in text or "AccountChooser" in text:
+        # ระบบที่บังคับล็อกอินโดเมน (เช่น /cer/) — ตัวเฝ้าล็อกอินแทนไม่ได้
+        # เจอหน้านี้แปลว่า deployment ยังอยู่จริง (ถ้าถูกลบจะได้ "Sorry, unable to open the file")
+        r["ok"], r["detail"] = True, "ต้องล็อกอินโดเมนก่อนใช้ — ตรวจได้แค่ว่า deployment ยังอยู่"
+    elif text.lstrip()[:1] in "{[":
+        r["ok"] = True                      # ตอบ JSON = backend ทำงาน (บาง API ตอบสั้นมากโดยตั้งใจ)
+    elif len(body) < 200:
+        r["detail"] = "GAS ตอบสั้นผิดปกติ"
+    else:
+        r["ok"] = True
+    return r
+
+
+def probe_all(state):
+    systems = [probe_php(s, c) for s, c in PHP_SYS.items()] + [probe_gas(s, n) for s, n in GAS_SYS.items()]
+    # client_id ล็อกอินต้องเป็นตัวเดียวกันทั้งพอร์ต — ตัวไหนหลุดไปจากพวกคือ config เพี้ยน
+    cids = Counter(s["cid"] for s in systems if s.get("cid"))
+    if cids:
+        main_cid = cids.most_common(1)[0][0]
+        for s in systems:
+            if s.get("cid") and s["cid"] != main_cid:
+                s["ok"] = False
+                s["detail"] = (s["detail"] + " · " if s["detail"] else "") + f"client_id ล็อกอินไม่ตรงกับระบบอื่น ({s['cid']})"
+    was = state.setdefault("sys_ok", {})
+    for s in systems:
+        prev = was.get(s["sys"])
+        if not s["ok"]:
+            alert(state, f'sys:{s["sys"]}', f'🔧 {s["name"]} (/{s["sys"]}/) มีปัญหา — {s["detail"] or "เช็คไม่ผ่าน"}', 6)
+        elif prev is False:
+            send_line(f'✅ {s["name"]} (/{s["sys"]}/) กลับมาปกติแล้ว\n{PAGE_URL}')
+            state.get("sent", {}).pop(f'sys:{s["sys"]}', None)
+        was[s["sys"]] = s["ok"]
+    return systems
 
 
 def da_query(cmd):
@@ -151,6 +273,12 @@ def main():
         send_line(f"✅ bangkho.ac.th กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['down_since'][11:16]} น.)\n{PAGE_URL}")
         state.pop("down_since")
         state.get("sent", {}).pop("down", None)
+
+    # 1.5) ท่อรายระบบ — ทะเบียนนักเรียน/ครู, ล็อกอิน, บันทึกสถิติ, GAS หลังเปลือก
+    try:
+        status["systems"] = probe_all(state)
+    except Exception as e:
+        status["errors"].append(f"ตรวจระบบย่อยไม่สำเร็จ: {type(e).__name__}")
 
     # 2) ยอดรายเดือน + พื้นที่ดิสก์ (DirectAdmin สรุปวันละครั้ง)
     try:
