@@ -119,6 +119,15 @@ def fetch(url, timeout=30):
         return 0, f"เชื่อมต่อไม่ได้ ({type(e).__name__})".encode()
 
 
+def fetch_retry(url, timeout=40):
+    """GAS พลาดชั่วคราวได้บ่อย (ตอบ 404/503 คนละอย่างกับตอนเรียกจากเครื่องที่บ้าน) — ลองซ้ำก่อนตัดสินว่าพัง"""
+    code, body = fetch(url, timeout)
+    if not body or not (0 < code < 400):
+        time.sleep(3)
+        code, body = fetch(url, timeout)
+    return code, body
+
+
 def site_up(url):
     """หน้าเว็บของระบบยังเปิดได้ไหม (ใช้แยก 🔴 เข้าไม่ได้เลย ออกจาก 🟡 เข้าได้แต่ท่อมีปัญหา)"""
     code, body = fetch(url, timeout=25)
@@ -174,7 +183,7 @@ def probe_gas(slug, name):
         r["detail"] = "ไม่พบลิงก์ /exec ในหน้าเปลือก"
         return r
     # GAS ตอบ 404 เองได้เมื่อแอปไม่รู้จักหน้าที่ขอ (เช่น /result/ ต้องมี ?page=) — ดูเนื้อหาต่อว่า script ยังทำงาน
-    code, body = fetch(m.group(0), timeout=40)
+    code, body = fetch_retry(m.group(0))
     if not body:
         r["detail"] = f"เรียก GAS ไม่ได้ (HTTP {code})" if code else "เรียก GAS ไม่ได้"
         return r
@@ -205,17 +214,21 @@ def probe_link(slug, cfg):
         r["site"] = False
         r["detail"] = "หน้าเว็บเปิดไม่ได้"
         return r
-    code, body = fetch(cfg["pipe"], timeout=40)
+    code, body = fetch_retry(cfg["pipe"])
     r["ms"] = round((time.time() - t0) * 1000)
     text = body.decode("utf-8", "ignore")[:4000]
-    if not body or not (0 < code < 400):
-        r["detail"] = f'{cfg["pipe_name"]}ไม่ตอบ (HTTP {code})' if code else f'{cfg["pipe_name"]}เรียกไม่ได้'
-    elif next((b for b in GAS_BAD if b in text), None):
-        r["detail"] = f'{cfg["pipe_name"]}ตอบผิดปกติ'
-    elif cfg.get("expect") and cfg["expect"] not in text:
-        r["detail"] = f'{cfg["pipe_name"]}ตอบไม่ตรงที่ควรเป็น'
+    name = cfg["pipe_name"]
+    if next((b for b in GAS_BAD if b in text), None):
+        r["detail"] = f"{name} ตอบผิดปกติ"
+    elif cfg.get("expect"):
+        # มีคำตอบที่ถูกต้องให้เทียบ → ใช้ตัวนี้ตัดสิน (บาง endpoint ตอบ 404 แต่ทำงานได้จริง)
+        r["ok"] = cfg["expect"] in text
+        if not r["ok"]:
+            r["detail"] = f"{name} ตอบไม่ตรงที่ควรเป็น (HTTP {code})"
+    elif not body or not (0 < code < 400):
+        r["detail"] = f"{name} ไม่ตอบ (HTTP {code})" if code else f"{name} เรียกไม่ได้"
     elif len(body) < cfg.get("least", 1):
-        r["detail"] = f'{cfg["pipe_name"]}ตอบข้อมูลน้อยผิดปกติ ({len(body)} ไบต์)'
+        r["detail"] = f"{name} ตอบข้อมูลน้อยผิดปกติ ({len(body)} ไบต์)"
     else:
         r["ok"] = True
     return r
@@ -241,7 +254,7 @@ def probe_all(state):
         if s["level"] == "down":
             alert(state, f'sys:{s["sys"]}', f'🔴 {s["name"]} — เข้าเว็บไม่ได้เลย ({s["detail"] or "ไม่ตอบ"})', 6)
         elif s["level"] == "warn":
-            alert(state, f'sys:{s["sys"]}', f'🟡 {s["name"]} — เว็บเข้าได้ แต่{s.get("pipe_name", "ท่อ")}มีปัญหา: {s["detail"] or "เช็คไม่ผ่าน"}', 6)
+            alert(state, f'sys:{s["sys"]}', f'🟡 {s["name"]} — เว็บเข้าได้ แต่ {s.get("pipe_name", "ท่อ")} มีปัญหา: {s["detail"] or "เช็คไม่ผ่าน"}', 6)
         elif prev is False:
             send_line(f'🟢 {s["name"]} กลับมาปกติแล้ว\n{PAGE_URL}')
             state.get("sent", {}).pop(f'sys:{s["sys"]}', None)
