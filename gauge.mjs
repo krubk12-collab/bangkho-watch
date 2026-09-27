@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 const STREAM = 'https://stream.firsttech.co.th/live/nakornnont.stream/playlist.m3u8';
-const CROP = 'crop=110:360:430:0';          // ตำแหน่งไม้วัดในภาพ 800×600 — ถ้ากล้องขยับ แก้ตรงนี้
+const CROP = 'crop=160:600:410:0';          // ตำแหน่งไม้วัดในภาพ 800×600 — ถ้ากล้องขยับ แก้ตรงนี้
 const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/gauge.json`;
 const KEEP_H = 72;                            // เก็บประวัติ 3 วัน
@@ -15,16 +15,16 @@ const LEVELS = [2.5, 2.8, 3.0];
 const RISE_CM_1H = 15;                        // ขึ้นเร็วเกิน 15 ซม./ชม. = แจ้ง
 const dry = process.env.DRY_RUN === '1';
 
-const PROMPT = `This is a river staff gauge (Thai style, E-pattern, black marks every 2 cm, labels every 10 cm: 90,80,...,10 then a meter mark, then 90,80,...). The lower segment's labels are in the 2-meter range (e.g. "50" means 2.50 m); the upper segment is the 3-meter range. Find where the WATER SURFACE meets the gauge and read the level in meters (2 decimals). If the water line is not visible, the gauge is hidden/blurred, or the camera is pointing elsewhere, set visible=false. Reply JSON only: {"visible":bool,"level_m":number,"confidence":0-1,"note":"short"}`;
+const PROMPT = `This is a river staff gauge (Thai style, E-pattern, black marks every 2 cm, labels every 10 cm: 90,80,...,10 then a meter mark, then 90,80,...). The lower segment runs 2.00–2.90 m (labels 90..10 then 2.00 at its bottom end; e.g. "50" means 2.50 m); the upper segment is 3.00–3.90 m. Ignore the red/yellow painted post beside the gauge and the blue pipe; read only where water meets the white gauge face. Find where the WATER SURFACE meets the gauge and read the level in meters (2 decimals). If the water line is not visible, the gauge is hidden/blurred, or the camera is pointing elsewhere, set visible=false. Reply JSON only: {"visible":bool,"level_m":number,"confidence":0-1,"note":"short"}`;
 
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 function grab() {
   const raw = `${OUT}/_frame.jpg`, crop = `${OUT}/_crop.png`;
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-rw_timeout', '20000000', '-i', STREAM, '-frames:v', '1', raw], {timeout: 60000});
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-vf', `${CROP},scale=330:1080:flags=lanczos`, crop]);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-vf', `${CROP},scale=480:1800:flags=lanczos`, crop]);
   // รูปที่โชว์บนเว็บ: ไม้วัด + ผิวน้ำ ขนาดเล็ก
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-vf', 'crop=300:420:330:0', '-q:v', '5', `${OUT}/gauge.jpg`]);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-vf', 'crop=300:560:330:0', '-q:v', '5', `${OUT}/gauge.jpg`]);
   const b = fs.readFileSync(crop).toString('base64');
   fs.rmSync(raw); fs.rmSync(crop);
   return b;
