@@ -19,6 +19,7 @@ jobs:
           mkdir -p site
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
+            git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
           fi
       - name: check
         env:
@@ -28,6 +29,13 @@ jobs:
           LINE_NOTIFY_KEY: ${{ secrets.LINE_NOTIFY_KEY }}
           OUT_DIR: site
         run: python watch.py
+      - name: water alert (Telegram)
+        continue-on-error: true      # เตือนน้ำพลาดต้องไม่ทำให้หน้าสถานะเว็บหยุด
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          OUT_DIR: site
+        run: node water_alert.mjs
       - name: publish status page
         run: |
           cp page/index.html site/index.html
