@@ -1,6 +1,6 @@
 // อ่านไม้วัดระดับน้ำจากกล้อง CCTV (ท่าน้ำนนท์ + ท่าน้ำปากเกร็ด) ด้วย Gemini แล้วเก็บเป็นกราฟ + แจ้ง Telegram
 // ขั้นตอน: ffmpeg ดึง 1 เฟรมจากสตรีม → ครอปเฉพาะไม้วัด ขยาย 3 เท่า → Gemini ตอบ JSON → กรองค่าที่ไม่น่าเชื่อ
-// env: GEMINI_API_KEY, TG_TOKEN, TG_CHAT, OUT_DIR (<file>.json + <file>.jpg ต่อกล้อง), DRY_RUN=1 (ไม่ส่ง Telegram)
+// env: GEMINI_API_KEY, CAM_KEY, TG_TOKEN, TG_CHAT, OUT_DIR (<file>.json + <file>.jpg ต่อกล้อง), DRY_RUN=1 (ไม่ส่ง Telegram)
 // repo สาธารณะ → ห้าม print คีย์/เนื้อหาข้อความลง log
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -20,17 +20,27 @@ const CAMS = [
     crop: 'crop=160:600:410:0,scale=480:1800:flags=lanczos', web: 'crop=300:560:330:0',
     prompt: `This is a river staff gauge (Thai style, E-pattern, black marks every 2 cm, labels every 10 cm: 90,80,...,10 then a meter mark, then 90,80,...). The lower segment runs 2.00–2.90 m (labels 90..10 then 2.00 at its bottom end; e.g. "50" means 2.50 m); the upper segment is 3.00–3.90 m. Ignore the red/yellow painted post beside the gauge and the blue pipe; read only where water meets the white gauge face. Find where the WATER SURFACE meets the gauge and read the level in meters (2 decimals). If the water line is not visible, the gauge is hidden/blurred, or the camera is pointing elsewhere, set visible=false. crit_touch is always false here.`},
   // ponytail: ระดับอ้างอิงไม้วัดปากเกร็ดยังไม่รู้ (ตอน สสน. 2.53 ปลายไม้วัดยังลอยเหนือน้ำ) — เลยไม่เทียบกับ สสน.
-  {id: 'pakkret', name: 'ท่าน้ำปากเกร็ด', file: 'gauge-pakkret', ref: false,
-    stream: 'https://thaiclouderp.com/video/pakkret-river.m3u8',
+  {id: 'pakkret', name: 'ท่าน้ำปากเกร็ด', file: 'gauge-pakkret', ref: false, bottom: 2.26,   // ปลายล่างไม้วัด (ขีด 30 ลงไปอีกนิด)
+    // กล้องรับเฉพาะ IP ไทย → ให้โฮสต์ bangkho.ac.th ส่งต่อ 500KB แรกของท่อนล่าสุด (cam.php + secret CAM_KEY)
+    relay: 'https://bangkho.ac.th/water/cam.php',
     crop: 'crop=90:480:715:0,scale=270:1440:flags=lanczos', web: 'crop=420:420:520:0',
     prompt: `River staff gauge (yellow, E-pattern, black marks every 2 cm, labels every 10 cm). From the top: 50,40,30,20,10, a meter joint, then 90,80,...,30. The part above the joint is the 3-meter range ("50" = 3.50 m), below it the 2-meter range ("80" = 2.80 m). Find where the WATER SURFACE meets the yellow gauge and read the level in meters (2 decimals). If the gauge's bottom end is ABOVE the water (air gap, only a reflection or a hanging string below it), set below_gauge=true and level_m=null. Beside the gauge is a red post labelled "วิกฤต" (critical) with a yellow base: set crit_touch=true only if the water reaches that post's base. If the view is dark/blurred/pointing elsewhere set visible=false.`},
 ];
 
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
-function grab(c) {
+async function grab(c) {
   const raw = `${OUT}/_frame.jpg`, crop = `${OUT}/_crop.png`;
-  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-rw_timeout', '20000000', '-user_agent', 'Mozilla/5.0', '-i', c.stream, '-frames:v', '1', raw], {timeout: 60000});
+  let src = c.stream;
+  if (c.relay) {   // โหลดเองด้วย fetch — ถ้าส่ง URL ให้ ffmpeg ข้อความ error จะพิมพ์กุญแจลง log สาธารณะ
+    const r = await fetch(c.relay + '?k=' + encodeURIComponent(process.env.CAM_KEY || ''), {signal: AbortSignal.timeout(40000)});
+    if (!r.ok) throw new Error('relay ' + r.status);
+    src = `${OUT}/_seg.ts`;
+    fs.writeFileSync(src, Buffer.from(await r.arrayBuffer()));
+  }
+  const net = c.relay ? [] : ['-rw_timeout', '20000000', '-user_agent', 'Mozilla/5.0'];   // ใช้กับ URL เท่านั้น ไฟล์ในเครื่องจะ error
+  try { execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...net, '-i', src, '-frames:v', '1', raw], {timeout: 60000}); }
+  finally { if (c.relay) fs.rmSync(src, {force: true}); }
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-vf', c.crop, crop]);
   // รูปที่โชว์บนเว็บ: ไม้วัด + ผิวน้ำ ขนาดเล็ก
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-vf', c.web, '-q:v', '5', `${OUT}/${c.file}.jpg`]);
@@ -61,10 +71,11 @@ async function pakKret() {
 }
 
 // คืนเหตุผลที่ไม่รับค่า หรือ '' ถ้ารับ
-export function reject(v, hist, pk, now) {
+export function reject(v, hist, pk, now, bottom = 1) {
   if (!v || !v.visible) return 'มองไม่เห็นผิวน้ำ';
   if (v.below_gauge) return 'น้ำต่ำกว่าปลายไม้วัด';
   const x = +v.level_m;
+  if (x > 0 && x < bottom) return 'น้ำต่ำกว่าปลายไม้วัด';   // AI เดาต่ำกว่าช่วงที่ไม้วัดมี = อ่านไม่ได้จริง
   if (!(x >= 1 && x <= 3.99)) return 'ค่าอยู่นอกช่วงไม้วัด';
   if ((+v.confidence || 0) < 0.6) return 'AI ไม่มั่นใจ';
   if (pk && Math.abs(x - pk.wl) > 0.6) return 'ต่างจากปากเกร็ดเกิน 60 ซม.';
@@ -87,8 +98,8 @@ async function runCam(c, pk) {
   const G = readJson(FILE, {h: [], alerts: {}});
   G.h = G.h.filter(h => now - Date.parse(h.t) < KEEP_H * 3600e3);
   let v, why;
-  try { v = await ask(c, grab(c)); } catch (e) { why = 'ดึงภาพ/อ่านไม่สำเร็จ'; console.log(c.id + ':', e.message.split('\n')[0]); }
-  why = why || reject(v, G.h, c.ref ? pk : null, now);
+  try { v = await ask(c, await grab(c)); } catch (e) { why = 'ดึงภาพ/อ่านไม่สำเร็จ'; console.log(c.id + ':', e.message.split('\n')[0]); }
+  why = why || reject(v, G.h, c.ref ? pk : null, now, c.bottom);
   const rec = {t: new Date(now).toISOString(), m: v?.level_m != null ? Math.round(v.level_m * 100) / 100 : null, ok: !why};
   if (why) rec.why = why;
   if (v?.visible && (+v.confidence || 0) >= 0.6) rec.crit = !!v.crit_touch;
@@ -141,5 +152,6 @@ if (process.argv[2] === 'test') {   // node gauge.mjs test
   eq(reject(V(3.4), [], {wl: 2.5}, t), 'ต่างจากปากเกร็ดเกิน 60 ซม.');
   eq(reject(V(2.8), [ok(2.4, 10)], null, t), 'กระโดดเกิน 25 ซม. ใน 40 นาที');
   eq(reject(V(2.8), [ok(2.4, 120)], null, t), '');
+  eq(reject(V(2.2), [], null, t, 2.26), 'น้ำต่ำกว่าปลายไม้วัด');
   console.log('ok');
 }

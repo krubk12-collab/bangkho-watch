@@ -42,6 +42,7 @@ jobs:
         timeout-minutes: 3
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CAM_KEY: ${{ secrets.CAM_KEY }}
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
