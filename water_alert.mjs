@@ -59,7 +59,23 @@ if (st.alertedLvl == null) {
 } else if (a.lvl !== st.alertedLvl && (seen >= 2 || a.lvl === 3)) {
   await send(message(a, st.alertedLvl)); sent = true;
 }
+// ดาวเทียม GISTDA: แจ้งเมื่อพบตำบลใหม่ที่น้ำท่วมขังในนนทบุรี/อำเภอใกล้เคียง (3 วันล่าสุด)
+const g3 = r.GI && r.GI['3days'];
+let gSeen = st.gistdaSeen || [];
+if (g3) {
+  const rows = [...g3.nont.map(x => [...x, 1]), ...g3.near.map(x => [...x, 0])];
+  const fresh = rows.filter(x => !gSeen.includes(x.slice(0, 3).join('|')));
+  if (fresh.length) {
+    const inNont = fresh.filter(x => x[6]);
+    await send(`🛰️ <b>ดาวเทียม GISTDA พบน้ำท่วมขัง${inNont.length ? 'ใน<u>นนทบุรี</u>' : 'ใกล้นนทบุรี'} ${fresh.length} ตำบลใหม่</b>\n` +
+      fresh.slice(0, 10).map(x => `${x[6] ? '🔴' : '🟡'} ${x[2]} ${x[1]} ${x[0].replace('จ.', '')} · ${x[3].toLocaleString('th-TH')} ไร่`).join('\n') +
+      (fresh.length > 10 ? `\n… และอีก ${fresh.length - 10} ตำบล` : '') +
+      `\n\n🔗 ${SITE}#sat\n<i>ข้อมูลภาพดาวเทียม 3 วันล่าสุดจาก disaster.gistda.or.th</i>`);
+  }
+  gSeen = rows.map(x => x.slice(0, 3).join('|'));   // ตำบลที่หายไปแล้วกลับมาใหม่ = แจ้งอีกรอบ
+}
 saveState({
+  gistdaSeen: gSeen,
   lvl: a.lvl, name: a.name, checkedAt: now,
   alertedLvl: sent ? a.lvl : st.alertedLvl, alertedAt: sent ? now : st.alertedAt,
   pendingLvl: a.lvl, pendingCount: seen,
