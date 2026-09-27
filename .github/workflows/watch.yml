@@ -20,7 +20,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            git show FETCH_HEAD:gauge.json > site/gauge.json 2>/dev/null || rm -f site/gauge.json
+            for f in gauge.json gauge-pakkret.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
           fi
       - name: check
         env:
