@@ -27,8 +27,11 @@ function message(a, prevLvl) {
   const arrow = prevLvl == null ? '' : a.lvl > prevLvl ? ` ⬆️ (จาก${W.NAMES[prevLvl]})` : ` ⬇️ (จาก${W.NAMES[prevLvl]})`;
   const pick = list => [...list.filter(x => x[0] >= 1), ...list.filter(x => x[0] === 0)].slice(0, 4)
     .map(x => `${ICON[x[0]]} ${x[1].replace(/<(?!\/?b>)[^>]+>/g, '')}`).join('\n');
+  // น้ำขึ้นลงวันละ 2 รอบ — บอกยอด/ต่ำสุดแต่ละรอบเทียบตลิ่ง (ระดับคิดจากยอด 24 ชม. จึงไม่สลับตามน้ำขึ้นลง)
+  const tide = a.tide && a.tide.length ? `<b>น้ำขึ้น-ลง คลองมหาสวัสดิ์</b> (ตลิ่ง ${a.canal.bank.toFixed(2)} ม.)\n` +
+    a.tide.map(r => `${r.type === 'hi' ? '⬆️' : '⬇️'} ${r.when} ${r.day} ${r.time} <b>${r.v.toFixed(2)}</b> ${r.over ? `เกินตลิ่ง +${r.cm}` : `ต่ำกว่าตลิ่ง ${-r.cm}`} ซม.`).join('\n') + '\n\n' : '';
   return `${ICON[a.lvl]} <b>ระดับเฝ้าระวัง ณ โรงเรียนชุมชนวัดบางโค: ${a.name}</b>${arrow}\n${a.advice}\n\n` +
-    `<b>ในพื้นที่รอบโรงเรียน</b>\n${pick(a.L)}\n\n<b>ต้นทาง</b>\n${pick(a.U)}\n\n` +
+    `<b>ในพื้นที่รอบโรงเรียน</b>\n${pick(a.L)}\n\n${tide}<b>ต้นทาง</b>\n${pick(a.U)}\n\n` +
     `🔗 ${SITE}\n<i>ประเมินอัตโนมัติ ไม่ใช่ประกาศทางการ · เหตุฉุกเฉินโทร 1784</i>`;
 }
 
