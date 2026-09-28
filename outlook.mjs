@@ -89,7 +89,8 @@ async function context() {
       gistda_3days: r.GI?.['3days'] ? {nont: r.GI['3days'].nont, near: r.GI['3days'].near.slice(0, 8), total_rai: r.GI['3days'].rai} : null,
       staff_gauge_ai: {nont_pier: lastPts(gN), pakkret_pier_zones_watch_2_20_critical_2_90: lastPts(gP)},
       news_titles: (news?.items || []).slice(0, 12).map(n => n.t),
-      school_observation: 'ครูถ่ายรูปที่โรงเรียน 28 ก.ย. 2569 ช่วงสาย: น้ำในร่อง/บ่อข้างอาคารสูง แต่ยังต่ำกว่าขอบลานทางเดินราว 20–30 ซม. ลานยังแห้ง',
+      // ponytail: รายงานจากครูใส่มือ หมดอายุเอง 36 ชม. — ถ้ามีไม้วัดที่ร่องข้างอาคารแล้ว ค่อยทำเป็นไฟล์/ฟอร์มให้ครูอัปเดตเอง
+      school_observation: Date.now() < Date.parse('2026-09-29T23:00:00+07:00') ? 'ครูถ่ายรูปที่โรงเรียน 28 ก.ย. 2569 ช่วงสาย: น้ำในร่อง/บ่อข้างอาคารสูง แต่ยังต่ำกว่าขอบลานทางเดินราว 20–30 ซม. ลานยังแห้ง' : 'ไม่มีรายงานจากโรงเรียนล่าสุด — ห้ามสรุปสภาพลานโรงเรียนเอง',
     }};
 }
 
