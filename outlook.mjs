@@ -11,7 +11,13 @@ const FILE = `${OUT}/outlook.json`;
 const EVERY_H = 3;                        // ponytail: ถามทุก 3 ชม. พอ — พยากรณ์ ECMWF/GFS อัปเดตวันละ 2–4 รอบ
 const MODELS = ['gemini-3.1-pro-preview', 'gemini-flash-latest'];
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
-const get = (u, ms = 30000) => fetch(u, {signal: AbortSignal.timeout(ms)});
+// Open-Meteo ต่อจาก runner GitHub ไม่ติดบางครั้ง (UND_ERR_CONNECT_TIMEOUT) → ลองซ้ำ 3 รอบ
+async function get(u, ms = 30000) {
+  for (let i = 0; ; i++) {
+    try { return await fetch(u, {signal: AbortSignal.timeout(ms)}); }
+    catch (e) { if (i >= 2) throw e; await new Promise(r => setTimeout(r, 3000)); }
+  }
+}
 const r1 = v => v == null ? null : Math.round(v * 10) / 10;
 
 // จุดพยากรณ์: โรงเรียน + ต้นน้ำ (ฝนต้นน้ำ = น้ำเหนือที่จะมาถึงใน 1–2 สัปดาห์)

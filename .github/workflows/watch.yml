@@ -55,6 +55,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           OUT_DIR: site
+          NODE_OPTIONS: --dns-result-order=ipv4first
         run: node outlook.mjs
       - name: publish status page
         run: |
