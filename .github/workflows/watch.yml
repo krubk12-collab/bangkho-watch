@@ -36,6 +36,7 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
+          NODE_OPTIONS: --dns-result-order=ipv4first
         run: node water_alert.mjs
       - name: staff gauge Nonthaburi pier (AI)
         continue-on-error: true

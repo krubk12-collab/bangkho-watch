@@ -44,10 +44,16 @@ async function send(text) {
   if (!j.ok) throw new Error('telegram ' + (j.error_code || r.status));
 }
 
-let r;
-try { r = await assessNow(); }
-catch (e) { console.log('water: ข้ามรอบนี้ —', e.message); process.exit(0); }   // เว็บล่ม watch.py แจ้งอยู่แล้ว
-if (!r.FC || !r.TIDE) { console.log('water: พยากรณ์ยังโหลดไม่ครบ ข้ามรอบนี้'); process.exit(0); }  // ไม่ให้ระดับตกเพราะข้อมูลขาด
+// เน็ตจาก runner GitHub → โฮสต์ไทย/Open-Meteo สะดุดบ่อย (เคยข้าม 4 ใน 60 รอบ "fetch failed") → ลองซ้ำ 3 ครั้ง ห่าง 15 วิ
+let r, why = '';
+for (let i = 0; i < 3; i++) {
+  if (i) await new Promise(ok => setTimeout(ok, 15000));
+  try { r = await assessNow(); why = r.FC && r.TIDE ? '' : 'พยากรณ์ยังโหลดไม่ครบ'; }
+  catch (e) { r = null; why = e.cause?.code || e.message; }
+  if (!why) break;
+}
+// เว็บล่ม watch.py แจ้งอยู่แล้ว · ข้อมูลขาดห้ามคำนวณ ไม่งั้นระดับตกเพราะข้อมูลหาย
+if (why) { console.log('water: ข้ามรอบนี้ (ลอง 3 ครั้ง) —', why); process.exit(0); }
 
 const a = r.a, now = new Date().toISOString();
 const st = readState() || {};
