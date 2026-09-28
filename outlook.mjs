@@ -123,7 +123,7 @@ async function askAI(parts) {
 async function run() {
   const prev = readJson(FILE, null);
   if (process.env.FORCE !== '1' && prev?.t && Date.now() - Date.parse(prev.t) < EVERY_H * 36e5 - 10 * 6e4) { console.log('outlook: ยังไม่ครบรอบ'); return prev; }
-  const [ctx, fc] = await Promise.all([context(), forecast()]);
+  const [ctx, fc] = await Promise.all([context().catch(e => { throw new Error('ข้อมูลน้ำ: ' + (e.cause?.code || e.message)); }), forecast().catch(e => { throw new Error('พยากรณ์: ' + (e.cause?.code || e.message)); })]);
   const imgs = await images(ctx.D);
   const parts = [{text: PROMPT + '\n\nข้อมูลสถานการณ์ปัจจุบัน:\n' + JSON.stringify(ctx.text) + '\n\nตัวเลขพยากรณ์รายวัน 7 วัน:\n' + JSON.stringify(fc)},
     ...imgs.flatMap(i => [{text: 'ภาพ: ' + i.name}, i.part])];
