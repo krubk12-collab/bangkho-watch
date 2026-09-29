@@ -24,7 +24,7 @@ export function parse(txt) {
     return m.length ? {q: num(m[0][1]), prev: m[1] ? num(m[1][1]) : null} : null;
   };
   const d = T.match(new RegExp(`(\\d{1,2}) (${MON.map(m => m.replace(/\./g, '\\.')).join('|')}) (25\\d\\d)`));
-  const s = T.match(/นนทบุรี จ\.นนทบุรี ([\d.]+) (\S+)/);
+  const s = T.match(/นนท\S* ?\S* จ\. ?นนท\S*\s+(\d\.\d+)\s+(\S+)/);   // pdftotext แต่ละรุ่นเว้นวรรคในคำไทยไม่เหมือนกัน
   return {
     date: d ? `${+d[3] - 543}-${String(MON.indexOf(d[2]) + 1).padStart(2, '0')}-${d[1].padStart(2, '0')}` : null,
     c2: flow('สถานี C.2 '), c13: flow('สถานี C.13'), rama6: flow('พระรามหก'), c29b: flow('C.29B'),
@@ -39,9 +39,10 @@ async function main() {
   const r = await fetch(URL, {headers: {'user-agent': 'Mozilla/5.0'}, signal: AbortSignal.timeout(60000)});
   if (!r.ok) throw new Error('rid: HTTP ' + r.status);
   fs.writeFileSync(PDF, Buffer.from(await r.arrayBuffer()));
-  const p = parse(execFileSync('pdftotext', ['-layout', '-enc', 'UTF-8', PDF, '-']).toString());
+  const txt = execFileSync('pdftotext', ['-layout', '-enc', 'UTF-8', PDF, '-']).toString(), p = parse(txt);
   // ค่าแปลก = รูปแบบ PDF เปลี่ยน → ไม่เขียนทับของเดิม
   if (!p.date || !p.c29b || p.c29b.q < 50 || p.c29b.q > 8000) { console.log('rid: ถอดไม่ได้', JSON.stringify(p)); return; }
+  if (!p.salt) console.log('rid: หาความเค็มไม่เจอ', JSON.stringify(txt.split('\n').filter(l => /0\.\d\d/.test(l)).slice(0, 6)));
   const {salt, ...flows} = p;
   const hist = [...(prev.hist || []).filter(h => h.date !== p.date),
     {date: p.date, ...Object.fromEntries(Object.entries(flows).filter(([k]) => k !== 'date').map(([k, v]) => [k, v?.q ?? null])), salt: salt?.v ?? null}]

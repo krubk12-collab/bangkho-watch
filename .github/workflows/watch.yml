@@ -55,6 +55,7 @@ jobs:
         timeout-minutes: 3
         env:
           OUT_DIR: site
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: |
           command -v pdftotext >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils >/dev/null)
           node rid.mjs
