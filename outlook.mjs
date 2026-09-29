@@ -77,6 +77,8 @@ async function context() {
   const [gN, gP] = await Promise.all([gauge('gauge'), gauge('gauge-pakkret')]);
   const lastPts = g => (g?.h || g?.hist || []).slice(-6);
   const c13 = r.D.stations.find(s => s.id === 2744);
+  // WeatherNext 2 (wn.mjs รันก่อนใน workflow เดียวกัน) — ทิ้งถ้าเก่าเกิน 13 ชม.
+  const wn = readJson(`${OUT}/wn.json`, null), wnOk = wn && Date.now() - Date.parse(wn.t) < 13 * 36e5;
   return {
     D: r.D,
     text: {
@@ -88,6 +90,9 @@ async function context() {
       stations_over_bank_chaophraya: (r.D.over || []).slice(0, 12).map(o => `${o.name} ${o.prov} +${o.diff} ม.`),
       gistda_3days: r.GI?.['3days'] ? {nont: r.GI['3days'].nont, near: r.GI['3days'].near.slice(0, 8), total_rai: r.GI['3days'].rai} : null,
       staff_gauge_ai: {nont_pier: lastPts(gN), pakkret_pier_zones_watch_2_20_critical_2_90: lastPts(gP)},
+      weathernext2_ensemble64_pct: wnOk ? {
+        school_daily_pct_heavy_ge35_veryheavy_ge90: wn.school.map(d => ({date: d.date, rain: d.rain, heavy: d.heavy, vheavy: d.vheavy, median_mm: d.med, p90_mm: d.p90})),
+        upstream_3day_sum_pct_ge60_ge120: wn.upstream.map(u => ({name: u.name, travel_days_to_nont: u.travel, worst: u.worst}))} : null,
       news_titles: (news?.items || []).slice(0, 12).map(n => n.t),
       // ponytail: รายงานจากครูใส่มือ หมดอายุเอง 36 ชม. — ถ้ามีไม้วัดที่ร่องข้างอาคารแล้ว ค่อยทำเป็นไฟล์/ฟอร์มให้ครูอัปเดตเอง
       school_observation: Date.now() < Date.parse('2026-09-29T23:00:00+07:00') ? 'ครูถ่ายรูปที่โรงเรียน 28 ก.ย. 2569 ช่วงสาย: น้ำในร่อง/บ่อข้างอาคารสูง แต่ยังต่ำกว่าขอบลานทางเดินราว 20–30 ซม. ลานยังแห้ง' : 'ไม่มีรายงานจากโรงเรียนล่าสุด — ห้ามสรุปสภาพลานโรงเรียนเอง',
@@ -97,6 +102,7 @@ async function context() {
 const PROMPT = `คุณเป็นผู้ช่วยวิเคราะห์สถานการณ์น้ำให้ "โรงเรียนชุมชนวัดบางโค" (ต.บางแม่นาง อ.บางใหญ่ จ.นนทบุรี ฝั่งตะวันตกแม่น้ำเจ้าพระยา ใกล้คลองมหาสวัสดิ์/คลองอ้อมนนท์)
 ผู้อ่านคือครู ผู้ปกครอง ผู้สูงอายุ — ต้องไม่ประมาท แต่ห้ามทำให้ตื่นตระหนก: ใช้ภาษาเรียบ ๆ บอกข้อเท็จจริงและสิ่งที่ควรทำ ไม่ใช้คำเร้าอารมณ์
 ประมวลทุกข้อมูลด้านล่าง: ตัวเลขพยากรณ์ 7 วัน (ฝน ECMWF เทียบ GFS, ความน่าจะเป็นฝน, เมฆ, ความกดอากาศต่ำสุด, ลม/ลมกระโชก, CAPE, ชั่วโมงพายุฝนฟ้าคะนอง) ที่โรงเรียนและต้นน้ำ,
+% โอกาสฝนหนักจาก Google WeatherNext 2 (64 ชุด ensemble — ใช้บอกความไม่แน่นอน ถ้า % ต่ำแต่ ECMWF/GFS ฝนมาก = มีโอกาสแต่ไม่แน่นอน, ถ้าเห็นตรงกันความมั่นใจสูงขึ้น; เป็นแบบจำลองทดลอง ใช้ประกอบ),
 ภาพแผนที่อากาศ/ดาวเทียม/ฝนพยากรณ์ที่แนบ (ดูร่องมรสุม หย่อมความกดอากาศต่ำ พายุ แนวฝน ว่าจะมาทางไทยตอนกลางไหม), ระดับน้ำคลอง/แม่น้ำ, น้ำขึ้นลงเทียบตลิ่ง, น้ำเหนือ C.13, เขื่อน, น้ำทะเลหนุน, ดาวเทียมน้ำท่วม, หัวข่าว
 เกณฑ์ risk รายวัน (ให้ตรงกับระดับของเว็บ): 0 ปกติ · 1 เฝ้าระวัง · 2 เตือนภัย · 3 วิกฤต
 - ระดับ 2 ขึ้นไปต้องมีหลักฐานชัด เช่น ฝนพยากรณ์ที่โรงเรียนเกิน 90 มม./วัน ที่ ECMWF และ GFS เห็นตรงกัน, หรือน้ำคลองเกินตลิ่งแม้ช่วงน้ำลง, หรือ C.13 เกิน 2,500 และยังเพิ่ม ร่วมกับน้ำทะเลหนุนสูง
