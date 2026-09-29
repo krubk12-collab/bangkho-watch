@@ -42,7 +42,7 @@ async function main() {
   const txt = execFileSync('pdftotext', ['-layout', '-enc', 'UTF-8', PDF, '-']).toString(), p = parse(txt);
   // ค่าแปลก = รูปแบบ PDF เปลี่ยน → ไม่เขียนทับของเดิม
   if (!p.date || !p.c29b || p.c29b.q < 50 || p.c29b.q > 8000) { console.log('rid: ถอดไม่ได้', JSON.stringify(p)); return; }
-  if (!p.salt) console.log('rid: หาความเค็มไม่เจอ', JSON.stringify(txt.split('\n').filter(l => /0\.\d\d/.test(l)).slice(0, 6)));
+  if (!p.salt) { const T = txt.replace(/\s+/g, ' '), i = T.indexOf('0.25'); console.log('rid: หาความเค็มไม่เจอ', JSON.stringify(T.slice(i - 300, i + 700))); }
   const {salt, ...flows} = p;
   const hist = [...(prev.hist || []).filter(h => h.date !== p.date),
     {date: p.date, ...Object.fromEntries(Object.entries(flows).filter(([k]) => k !== 'date').map(([k, v]) => [k, v?.q ?? null])), salt: salt?.v ?? null}]
