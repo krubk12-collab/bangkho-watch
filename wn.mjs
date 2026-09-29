@@ -52,6 +52,12 @@ export function periods(loc) {
   return out;
 }
 
+// รายชั่วโมง: % ชุดที่มีฝน ≥0.2 มม. ในชั่วโมงนั้น (ต้นทางละเอียดจริง ~6 ชม. → ค่าเป็นขั้นบันได)
+export function hourly(loc) {
+  const h = loc.hourly, M = Object.keys(h).filter(k => /^precipitation(_member\d+)?$/.test(k)).map(k => h[k]).filter(a => a.some(v => v != null));
+  return {start: h.time[0], wet: h.time.map((t, i) => { const v = M.map(m => m[i]).filter(x => x != null); return v.length ? pct(v.filter(x => x >= 0.2).length, v.length) : null; })};
+}
+
 // ฝนสะสม 3 วันแบบเลื่อน — member ที่ขาดข้อมูลวันใดวันหนึ่งไม่นับ (กันค่าต่ำเกินจริง)
 export function upstream(loc) {
   const d = loc.daily, M = members(d), w = [];
@@ -81,14 +87,29 @@ export async function build() {
   if (a.length !== P.length || !a[0].daily) throw new Error('ข้อมูลไม่ครบ');
   const school = daily(a[0]);
   if (!school[0].n) throw new Error('ไม่มี member');
-  let per = null;   // รายช่วงพลาดได้ ไม่ทำให้ทั้งรอบล้ม
+  let per = null, hr = null;   // รายช่วง/รายชั่วโมงพลาดได้ ไม่ทำให้ทั้งรอบล้ม
   try {
     const hj = await get('https://ensemble-api.open-meteo.com/v1/ensemble?' + new URLSearchParams({latitude: SCHOOL[0], longitude: SCHOOL[1],
-      hourly: 'precipitation', forecast_days: '3', timezone: 'Asia/Bangkok', models: 'google_weathernext2_ensemble'}));
-    per = periods(hj);
+      hourly: 'precipitation', forecast_days: '7', timezone: 'Asia/Bangkok', models: 'google_weathernext2_ensemble'}));
+    per = periods(hj); hr = hourly(hj);
   } catch (e) { console.log('wn: รายช่วงข้าม —', e.cause?.code || e.message); }
   return {t: new Date().toISOString(), model: 'Google WeatherNext 2 (64 ชุด) ผ่าน Open-Meteo', th: {HEAVY, VHEAVY, UP_HEAVY, UP_VHEAVY},
-    school, per, upstream: UP.map((p, i) => ({...p, ...upstream(a[i + 1])}))};
+    school, per, hr, upstream: UP.map((p, i) => ({...p, ...upstream(a[i + 1])}))};
+}
+
+// บันทึกเก็บไว้ตรวจย้อนหลัง: พยากรณ์ 72 ชม. ทั้งสองแหล่ง + ฝนวัดจริง สสน. รัศมี 10 กม. ณ ตอนนั้น → workflow ต่อท้ายลง branch fclog
+export async function logLine(W) {
+  const L = {t: W.t, wn: W.hr ? {start: W.hr.start, wet: W.hr.wet.slice(0, 72)} : null, om: null, obs: null};
+  try {
+    const o = await get('https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({latitude: SCHOOL[0], longitude: SCHOOL[1],
+      hourly: 'precipitation_probability,precipitation', forecast_days: '3', timezone: 'Asia/Bangkok'}));
+    L.om = {start: o.hourly.time[0], p: o.hourly.precipitation_probability, mm: o.hourly.precipitation};
+  } catch (e) { console.log('wn log: om ข้าม —', e.cause?.code || e.message); }
+  try {
+    const a = await get(SITE + 'api.php');
+    L.obs = (a.rain || []).filter(r => r.km <= 10).map(r => ({name: r.name, km: r.km, r1: r.r1, r24: r.r24, dt: r.dt}));
+  } catch (e) { console.log('wn log: obs ข้าม —', e.cause?.code || e.message); }
+  return L;
 }
 
 const thDay = s => { const d = new Date(s + 'T12:00:00+07:00'); return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]}`; };
@@ -136,6 +157,8 @@ function test() {
   for (let k = 0; k < 64; k++) hh[k ? 'precipitation_member' + String(k).padStart(2, '0') : 'precipitation'] = ht.map((t, i) => k === 63 && i === 16 ? null : i >= 15 && i < 18 && k < 32 ? 0.5 : 0);
   const pr = periods({hourly: {time: ht, ...hh}})['2026-10-01'];
   assert(pr[0].wet === 0 && pr[2].wet === 51 && pr[2].n === 63, 'periods ' + JSON.stringify(pr));
+  const hy = hourly({hourly: {time: ht, ...hh}});
+  assert(hy.wet[0] === 0 && hy.wet[15] === 50 && hy.wet[16] === 51 && hy.start === ht[0], 'hourly ' + hy.wet.slice(14, 18));
   console.log('wn.mjs test ผ่าน');
 }
 
@@ -150,6 +173,7 @@ async function main() {
   const next = up ? now : Object.fromEntries(Object.keys(now).map(k => [k, Math.min(sent[k] || 0, now[k])]));
   if (up) { const m = message(W); if (m) await send(m); }
   fs.writeFileSync(FILE, JSON.stringify({...W, sent: next}));
+  fs.writeFileSync(`${OUT}/fclog-line.json`, JSON.stringify(await logLine(W)) + '\n');
   console.log(`wn: โรงเรียนสูงสุด ${NAMES[now.school]}${up ? ' (ส่งแจ้งเตือนแล้ว)' : ''}`);
 }
 await main();

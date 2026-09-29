@@ -69,6 +69,20 @@ jobs:
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
           NODE_OPTIONS: --dns-result-order=ipv4first
         run: node wn.mjs
+      - name: forecast log → branch fclog (append-only)
+        # เก็บพยากรณ์ Open-Meteo + WeatherNext + ฝนวัดจริง ไว้ตรวจย้อนหลังว่าแหล่งไหนแม่น
+        # push แบบไม่ force: ถ้าดึงประวัติเดิมไม่ได้ GitHub จะปฏิเสธ → ข้อมูลเก่าไม่หาย
+        continue-on-error: true
+        timeout-minutes: 2
+        run: |
+          [ -s site/fclog-line.json ] || exit 0
+          U="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
+          git clone -q --depth=1 -b fclog "$U" fclog 2>/dev/null || { mkdir -p fclog && git -C fclog init -q -b fclog; }
+          cat site/fclog-line.json >> "fclog/$(TZ=Asia/Bangkok date +%Y-%m).jsonl"
+          rm -f site/fclog-line.json
+          cd fclog && git add -A
+          git -c user.name=bangkho-watch -c user.email=actions@users.noreply.github.com commit -qm "fclog $(TZ=Asia/Bangkok date '+%F %H:%M')"
+          git push -q "$U" fclog
       - name: 7-day outlook (AI, every 3h)
         continue-on-error: true
         timeout-minutes: 5
