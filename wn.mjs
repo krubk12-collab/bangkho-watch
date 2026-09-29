@@ -37,25 +37,30 @@ export function daily(loc) {
   });
 }
 
-// ความเห็นที่สองให้การ์ดหน้าแรก: % ชุดที่มีฝน ≥0.5 มม. ในแต่ละช่วงวันเรียน (ต้นทางจริงละเอียดราว 6 ชม.)
+// เทียบกับ Open-Meteo แบบเดียวกัน: เขานับ "ฝน ≥0.1 มม." รายชั่วโมง และการ์ดคิดรายช่วง = ค่าสูงสุดของรายชั่วโมง
+// ต้นทาง WeatherNext เป็นก้อน 6 ชม. (02–08, 08–14, …) เกลี่ยเท่ากันทุกชั่วโมงและปัดทีละ 0.1 → ใช้ค่ารายชั่วโมงตรง ๆ
+// (ลองหน้าต่าง 6 ชม. แล้ว คร่อม 2 ก้อน นับเกินตอนดึก/เช้ามืด)
+const WET = 0.1;
+const mems = h => Object.keys(h).filter(k => /^precipitation(_member\d+)?$/.test(k)).map(k => h[k]).filter(a => a.some(v => v != null));
+
 export const PER = [['06', '11'], ['11', '15'], ['15', '18']];
 export function periods(loc) {
-  const h = loc.hourly, M = Object.keys(h).filter(k => /^precipitation(_member\d+)?$/.test(k)).map(k => h[k]).filter(a => a.some(v => v != null));
+  const h = loc.hourly, M = mems(h), hw = hourly(loc).wet;
   const out = {};
   for (const date of [...new Set(h.time.map(t => t.slice(0, 10)))].slice(0, 3)) {
     out[date] = PER.map(([a, b]) => {
       const ix = h.time.map((t, i) => t.startsWith(date) && t.slice(11, 13) >= a && t.slice(11, 13) < b ? i : -1).filter(i => i >= 0);
-      const s = M.filter(m => ix.every(i => m[i] != null)).map(m => ix.reduce((x, i) => x + m[i], 0)), n = s.length;
-      return {n, wet: pct(s.filter(x => x >= 0.5).length, n), med: r1(q(s, .5))};
+      const s = M.filter(m => ix.every(i => m[i] != null)).map(m => ix.reduce((x, i) => x + m[i], 0)), w = ix.map(i => hw[i]).filter(x => x != null);
+      return {n: s.length, wet: w.length ? Math.max(...w) : null, med: r1(q(s, .5))};
     });
   }
   return out;
 }
 
-// รายชั่วโมง: % ชุดที่มีฝน ≥0.2 มม. ในชั่วโมงนั้น (ต้นทางละเอียดจริง ~6 ชม. → ค่าเป็นขั้นบันได)
+// รายชั่วโมง: % ชุดที่มีฝน ≥0.1 มม. ในชั่วโมงนั้น (ชุดที่ขาดข้อมูลชั่วโมงนั้นไม่นับ)
 export function hourly(loc) {
-  const h = loc.hourly, M = Object.keys(h).filter(k => /^precipitation(_member\d+)?$/.test(k)).map(k => h[k]).filter(a => a.some(v => v != null));
-  return {start: h.time[0], wet: h.time.map((t, i) => { const v = M.map(m => m[i]).filter(x => x != null); return v.length ? pct(v.filter(x => x >= 0.2).length, v.length) : null; })};
+  const h = loc.hourly, M = mems(h);
+  return {start: h.time[0], wet: h.time.map((t, i) => { const v = M.map(m => m[i]).filter(x => x != null); return v.length ? pct(v.filter(x => x >= WET).length, v.length) : null; })};
 }
 
 // ฝนสะสม 3 วันแบบเลื่อน — member ที่ขาดข้อมูลวันใดวันหนึ่งไม่นับ (กันค่าต่ำเกินจริง)
@@ -158,7 +163,10 @@ function test() {
   const pr = periods({hourly: {time: ht, ...hh}})['2026-10-01'];
   assert(pr[0].wet === 0 && pr[2].wet === 51 && pr[2].n === 63, 'periods ' + JSON.stringify(pr));
   const hy = hourly({hourly: {time: ht, ...hh}});
-  assert(hy.wet[0] === 0 && hy.wet[15] === 50 && hy.wet[16] === 51 && hy.start === ht[0], 'hourly ' + hy.wet.slice(14, 18));
+  assert(hy.wet[0] === 0 && hy.wet[15] === 50 && hy.wet[16] === 51 && hy.wet[18] === 0 && hy.start === ht[0], 'hourly ' + hy.wet.slice(14, 19));
+  // ฝนปรอย 0.1 มม. ชม.เดียว ก็นับ (เกณฑ์เดียวกับ Open-Meteo)
+  const hd = {time: ht}; for (let k = 0; k < 64; k++) hd[k ? 'precipitation_member' + String(k).padStart(2, '0') : 'precipitation'] = ht.map((t, i) => i === 8 && k < 16 ? 0.1 : 0);
+  assert(hourly({hourly: hd}).wet[8] === 25, 'drizzle');
   console.log('wn.mjs test ผ่าน');
 }
 
