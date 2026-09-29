@@ -37,6 +37,21 @@ export function daily(loc) {
   });
 }
 
+// ความเห็นที่สองให้การ์ดหน้าแรก: % ชุดที่มีฝน ≥0.5 มม. ในแต่ละช่วงวันเรียน (ต้นทางจริงละเอียดราว 6 ชม.)
+export const PER = [['06', '11'], ['11', '15'], ['15', '18']];
+export function periods(loc) {
+  const h = loc.hourly, M = Object.keys(h).filter(k => /^precipitation(_member\d+)?$/.test(k)).map(k => h[k]).filter(a => a.some(v => v != null));
+  const out = {};
+  for (const date of [...new Set(h.time.map(t => t.slice(0, 10)))].slice(0, 3)) {
+    out[date] = PER.map(([a, b]) => {
+      const ix = h.time.map((t, i) => t.startsWith(date) && t.slice(11, 13) >= a && t.slice(11, 13) < b ? i : -1).filter(i => i >= 0);
+      const s = M.filter(m => ix.every(i => m[i] != null)).map(m => ix.reduce((x, i) => x + m[i], 0)), n = s.length;
+      return {n, wet: pct(s.filter(x => x >= 0.5).length, n), med: r1(q(s, .5))};
+    });
+  }
+  return out;
+}
+
 // ฝนสะสม 3 วันแบบเลื่อน — member ที่ขาดข้อมูลวันใดวันหนึ่งไม่นับ (กันค่าต่ำเกินจริง)
 export function upstream(loc) {
   const d = loc.daily, M = members(d), w = [];
@@ -66,8 +81,14 @@ export async function build() {
   if (a.length !== P.length || !a[0].daily) throw new Error('ข้อมูลไม่ครบ');
   const school = daily(a[0]);
   if (!school[0].n) throw new Error('ไม่มี member');
+  let per = null;   // รายช่วงพลาดได้ ไม่ทำให้ทั้งรอบล้ม
+  try {
+    const hj = await get('https://ensemble-api.open-meteo.com/v1/ensemble?' + new URLSearchParams({latitude: SCHOOL[0], longitude: SCHOOL[1],
+      hourly: 'precipitation', forecast_days: '3', timezone: 'Asia/Bangkok', models: 'google_weathernext2_ensemble'}));
+    per = periods(hj);
+  } catch (e) { console.log('wn: รายช่วงข้าม —', e.cause?.code || e.message); }
   return {t: new Date().toISOString(), model: 'Google WeatherNext 2 (64 ชุด) ผ่าน Open-Meteo', th: {HEAVY, VHEAVY, UP_HEAVY, UP_VHEAVY},
-    school, upstream: UP.map((p, i) => ({...p, ...upstream(a[i + 1])}))};
+    school, per, upstream: UP.map((p, i) => ({...p, ...upstream(a[i + 1])}))};
 }
 
 const thDay = s => { const d = new Date(s + 'T12:00:00+07:00'); return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]}`; };
@@ -109,6 +130,12 @@ function test() {
   const W = {school: s, upstream: [{...UP[0], ...u}]};
   assert(message(W).includes('ฝนหนัก 50%'), 'msg');
   assert(message({school: [{lvl: 0}], upstream: []}) === null, 'ไม่มีอะไรเตือน = null');
+  // รายช่วง: 64 ชุด ครึ่งหนึ่งฝน 0.3 มม./ชม. ช่วงบ่าย (5 ชม. = 1.5 มม.) อีกครึ่งแห้ง · ชุดหนึ่งขาดข้อมูล = ไม่นับ
+  const ht = [], hh = {};
+  for (let i = 0; i < 24; i++) ht.push('2026-10-01T' + String(i).padStart(2, '0') + ':00');
+  for (let k = 0; k < 64; k++) hh[k ? 'precipitation_member' + String(k).padStart(2, '0') : 'precipitation'] = ht.map((t, i) => k === 63 && i === 16 ? null : i >= 15 && i < 18 && k < 32 ? 0.5 : 0);
+  const pr = periods({hourly: {time: ht, ...hh}})['2026-10-01'];
+  assert(pr[0].wet === 0 && pr[2].wet === 51 && pr[2].n === 63, 'periods ' + JSON.stringify(pr));
   console.log('wn.mjs test ผ่าน');
 }
 
