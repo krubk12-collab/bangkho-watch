@@ -24,11 +24,14 @@ export function parse(txt) {
     return m.length ? {q: num(m[0][1]), prev: m[1] ? num(m[1][1]) : null} : null;
   };
   const d = T.match(new RegExp(`(\\d{1,2}) (${MON.map(m => m.replace(/\./g, '\\.')).join('|')}) (25\\d\\d)`));
-  const s = T.match(/นนท\S* ?\S* จ\. ?นนท\S*\s+(\d\.\d+)\s+(\S+)/);   // pdftotext แต่ละรุ่นเว้นวรรคในคำไทยไม่เหมือนกัน
+  // ตารางความเค็ม: pdftotext แต่ละรุ่นวางตัวเลขก่อน/หลังชื่อสถานีไม่เหมือนกัน แต่ลำดับคงที่ สำแล → ท่าน้ำนนท์ → สามเสน
+  // → ตัดค่าเกณฑ์ (0.25/0.50/2.00) ออก แล้วเอาค่าที่ 2 · สถานะคิดเองจากเกณฑ์ (คำว่า "ปกติ" ใน PDF ตำแหน่งไม่แน่นอน)
+  const i25 = T.indexOf('0.25'), sv = i25 < 0 ? [] : [...T.slice(Math.max(0, i25 - 150), i25 + 600).matchAll(/\b(\d\.\d\d)\b/g)].map(m => +m[1]).filter(v => ![0.25, 0.5, 2].includes(v));
+  const s = sv.length >= 3 ? sv[1] : null;
   return {
     date: d ? `${+d[3] - 543}-${String(MON.indexOf(d[2]) + 1).padStart(2, '0')}-${d[1].padStart(2, '0')}` : null,
     c2: flow('สถานี C.2 '), c13: flow('สถานี C.13'), rama6: flow('พระรามหก'), c29b: flow('C.29B'),
-    salt: s ? {v: +s[1], status: s[2]} : null,
+    salt: s == null ? null : {v: s, status: s >= 2 ? 'เกินเกณฑ์เกษตร' : s >= 0.5 ? 'เกินเกณฑ์ผลิตประปา' : s >= 0.25 ? 'เฝ้าระวัง' : 'ปกติ'},
   };
 }
 
