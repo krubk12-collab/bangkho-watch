@@ -20,7 +20,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            for f in gauge.json gauge-pakkret.json outlook.json rid.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            for f in gauge.json gauge-pakkret.json outlook.json rid.json wn.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
           fi
       - name: check
         env:
@@ -59,6 +59,16 @@ jobs:
         run: |
           command -v pdftotext >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils >/dev/null)
           node rid.mjs
+      - name: WeatherNext heavy-rain odds (every 3h)
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          OUT_DIR: site
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
+          NODE_OPTIONS: --dns-result-order=ipv4first
+        run: node wn.mjs
       - name: 7-day outlook (AI, every 3h)
         continue-on-error: true
         timeout-minutes: 5
