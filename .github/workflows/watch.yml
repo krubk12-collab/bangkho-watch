@@ -80,6 +80,9 @@ jobs:
         # push แบบไม่ force: ถ้าดึงประวัติเดิมไม่ได้ GitHub จะปฏิเสธ → ข้อมูลเก่าไม่หาย
         continue-on-error: true
         timeout-minutes: 2
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
         run: |
           [ -s site/fclog-line.json ] || exit 0
           U="https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"

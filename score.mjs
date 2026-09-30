@@ -51,6 +51,32 @@ export function score(lines, now = Date.now() / 1000) {
   return {t: new Date(now * 1000).toISOString(), th: {dbz: RAIN_DBZ, say: SAY_RAIN}, all: {om: tally(rows, 'om'), wn: tally(rows, 'wn')}, byPer, rows: rows.slice(-45)};
 }
 
+// สรุปทุกเช้าทาง Telegram: ผลเมื่อวานรายช่วง + ความแม่นสะสม · ไม่มีข้อมูลเลย = null (ไม่ส่ง)
+const TH_MON = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+export function morning(S, yday) {
+  if (!S.all.om || !(S.all.om.n || S.all.wn.n)) return null;
+  const d = new Date(yday + 'T12:00:00+07:00'), f = v => v == null ? '–' : v + '%';
+  const mark = (v, rain) => v == null ? '' : (v >= S.th.say) === rain ? '✅' : '❌';
+  const acc = c => c.n ? `${c.acc}% (${c.hit + c.cn}/${c.n})` : '–';
+  const L = [`<b>📊 พยากรณ์ฝนแม่นแค่ไหน</b> — เมื่อวาน ${d.getDate()} ${TH_MON[d.getMonth()]}`];
+  const ys = S.rows.filter(r => r.d === yday);
+  L.push(...(ys.length ? ys.map(r => `${r.per}: ${r.rain ? '☔ ฝนตก' : '☀️ ไม่ตก'} · Open-Meteo ${f(r.om)}${mark(r.om, r.rain)} · WeatherNext ${f(r.wn)}${mark(r.wn, r.rain)}`)
+    : ['(เมื่อวานเรดาร์ไม่ครบ ไม่ได้ตัดสิน)']));
+  L.push('', '<b>สะสม</b>', `Open-Meteo ${acc(S.all.om)}`, `WeatherNext ${acc(S.all.wn)}`,
+    ...PERIODS.map(([p]) => `· ${p}: OM ${S.byPer[p].om.n ? S.byPer[p].om.acc + '%' : '–'} · WN ${S.byPer[p].wn.n ? S.byPer[p].wn.acc + '%' : '–'}`));
+  return L.join('\n') + `\n\n🔗 https://bangkho.ac.th/water/#c-fc
+<i>✅ = พยากรณ์ถูก (≥${S.th.say}% = บอกว่าฝน) · ของจริง = เรดาร์ตรงโรงเรียน ≥${S.th.dbz} dBZ</i>`;
+}
+
+async function send(text) {
+  if (process.env.DRY_RUN === '1' || !process.env.TG_TOKEN) { console.log('--- DRY_RUN ---\n' + text); return; }
+  const r = await fetch(`https://api.telegram.org/bot${process.env.TG_TOKEN}/sendMessage`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({chat_id: process.env.TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true})});
+  const j = await r.json();
+  if (!j.ok) throw new Error('telegram ' + (j.error_code || r.status));
+}
+
 function test() {
   const assert = (c, m) => { if (!c) throw new Error('FAIL ' + m); };
   // 1 ต.ค. 69: พยากรณ์ออก 05:00 · ฝนตกช่วงบ่ายจริง (เรดาร์ 40) ช่วงอื่นแห้ง
@@ -68,6 +94,9 @@ function test() {
   assert(score([L], at('2026-10-01', 16)).rows.length === 2, 'ยังไม่จบ');
   const hole = {...L, radar: Object.fromEntries(Object.entries(radar).filter(([t]) => +t < at('2026-10-01', 16)))};
   assert(!score([hole], at('2026-10-01', 20)).rows.some(x => x.per === 'บ่าย'), 'เรดาร์ขาด');
+  const m = morning(S, '2026-10-01');
+  assert(m.includes('บ่าย: ☔ ฝนตก · Open-Meteo 80%✅ · WeatherNext 10%❌') && m.includes('Open-Meteo 67% (2/3)'), 'morning ' + m);
+  assert(morning(score([], 0), '2026-10-01') === null, 'ว่าง = ไม่ส่ง');
   console.log('score.mjs test ผ่าน');
 }
 
@@ -79,4 +108,11 @@ else if (process.argv[2]) {
   const S = score(lines);
   fs.writeFileSync(process.argv[3] || `${dir}/score.json`, JSON.stringify(S));
   console.log(`score: ${S.rows.length} ช่วง · Open-Meteo ${S.all.om?.acc ?? '-'}% · WeatherNext ${S.all.wn?.acc ?? '-'}%`);
+  // ส่งสรุปวันละครั้ง รอบแรกที่รันช่วง 06:00–11:59 (ขั้น fclog รันทุก ~3 ชม.) · จำวันที่ส่งไว้ใน fclog/tg-sent.txt
+  const bkk = new Date(Date.now() + 7 * 36e5), today = bkk.toISOString().slice(0, 10), h = bkk.getUTCHours();
+  const SENT = `${dir}/tg-sent.txt`, last = fs.existsSync(SENT) ? fs.readFileSync(SENT, 'utf8').trim() : '';
+  if ((h >= 6 && h < 12 || process.env.FORCE_TG) && last !== today) {
+    const m = morning(S, new Date(Date.now() + 7 * 36e5 - 864e5).toISOString().slice(0, 10));
+    if (m) try { await send(m); fs.writeFileSync(SENT, today); console.log('score: ส่งสรุปเช้าแล้ว'); } catch (e) { console.log('score: ส่ง Telegram ไม่ได้ —', e.message); }
+  }
 }
