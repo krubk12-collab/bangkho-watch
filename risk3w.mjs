@@ -9,7 +9,8 @@ const FILE = `${OUT}/risk3w.json`;
 const EVERY_H = 6;                         // GloFAS ออกวันละรอบ
 const SITE = 'https://bangkho.ac.th/water/';
 const SCHOOL = [13.851028, 100.403063];
-const C13 = [15.175, 100.075];             // ช่องกริด GloFAS บนแม่น้ำสายหลักใกล้ C.13 (หาจากช่องที่น้ำมากสุดรอบสถานี)
+const C13 = [15.175, 100.075];
+const C29B = [14.025, 100.525];            // สามโคก ปทุมฯ = ใต้จุดที่ป่าสักไหลมาบรรจบที่อยุธยา (GloFAS ดิบสูงเกินจริง ~3 เท่า)             // ช่องกริด GloFAS บนแม่น้ำสายหลักใกล้ C.13 (หาจากช่องที่น้ำมากสุดรอบสถานี)
 // ponytail: เกณฑ์ตั้งต้น — C.13 2,500 = เกณฑ์เฝ้าระวังเดิมใน assess.js · 3,500 ≈ ใกล้ปี 54 (ยอด ~3,700) · ฝน 100 มม./สัปดาห์
 // ปรับหลังเก็บผลจริงช่วงปิดเทอม
 const Q_WATCH = 2500, Q_54 = 3500, RAIN_WK = 100;
@@ -29,25 +30,29 @@ export function spring(date) {
 }
 
 export function level(w) {
-  const n = w.north || {}, r = w.rain || {};
+  const r = w.rain || {}, n = {p54: (w.north || {}).p54, pWatch: Math.max((w.north || {}).pWatch ?? 0, (w.lower || {}).pWatch ?? 0)};
   if (n.p54 >= 30) return 3;
   if ((n.pWatch >= 50 && (w.spring.length || r.p >= 30)) || r.p >= 60) return 2;
   if (n.pWatch >= 30 || r.p >= 30 || (w.spring.length && n.pWatch >= 10)) return 1;
   return 0;
 }
 
-// days = วันที่ของสัปดาห์ · north: GloFAS daily ensemble (ค่าดิบ) · scale = ค่าจริง/ค่า GloFAS วันนี้
-export function weeks(start, {glofas, scale, ec, gfs}) {
+// GloFAS daily ensemble (ค่าดิบ) × scale (ค่าจริง/ค่า GloFAS วันนี้) → ค่าสูงสุดของสัปดาห์ต่อชุด
+function river(glofas, scale, days) {
+  if (!glofas || !scale) return null;
+  const idx = days.map(d => glofas.daily.time.indexOf(d)).filter(i => i >= 0);
+  const mx = members(glofas.daily, 'river_discharge').map(m => Math.max(...idx.map(i => m[i] ?? 0)) * scale).filter(v => v > 0);
+  if (idx.length < 4 || !mx.length) return null;
+  return {n: mx.length, pWatch: pct(mx.filter(v => v >= Q_WATCH).length, mx.length),
+    p54: pct(mx.filter(v => v >= Q_54).length, mx.length), med: Math.round(q(mx, .5)), p90: Math.round(q(mx, .9))};
+}
+
+// north = C.13 ชัยนาท · lower = C.29B สามโคก (รวมน้ำป่าสัก) · p54 ใช้แค่ C.13 (ยอดปี 54 ที่ C.29B ยังไม่ได้ยืนยัน)
+export function weeks(start, {glofas, scale, glofasL, scaleL, ec, gfs}) {
   const W = [];
   for (let k = 0; k < 4; k++) {
     const days = [...Array(7)].map((_, i) => addDay(start, k * 7 + i));
-    const w = {from: days[0], to: days[6], spring: days.filter(spring), north: null, rain: null};
-    if (glofas && scale) {
-      const idx = days.map(d => glofas.daily.time.indexOf(d)).filter(i => i >= 0);
-      const mx = members(glofas.daily, 'river_discharge').map(m => Math.max(...idx.map(i => m[i] ?? 0)) * scale).filter(v => v > 0);
-      if (idx.length >= 4 && mx.length) w.north = {n: mx.length, pWatch: pct(mx.filter(v => v >= Q_WATCH).length, mx.length),
-        p54: pct(mx.filter(v => v >= Q_54).length, mx.length), med: Math.round(q(mx, .5)), p90: Math.round(q(mx, .9))};
-    }
+    const w = {from: days[0], to: days[6], spring: days.filter(spring), north: river(glofas, scale, days), lower: river(glofasL, scaleL, days), rain: null};
     for (const [src, j] of [['ECMWF', ec], ['GFS', gfs]]) {
       if (!j) continue;
       const idx = days.map(d => j.daily.time.indexOf(d));
@@ -82,30 +87,31 @@ const tryGet = async (name, url) => { try { return await get(url); } catch (e) {
 async function build() {
   const today = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
   const ens = (m, days) => `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${SCHOOL[0]}&longitude=${SCHOOL[1]}&daily=precipitation_sum&forecast_days=${days}&models=${m}&timezone=Asia/Bangkok`;
-  const [glofas, ec, gfs, api, fd] = await Promise.all([
-    tryGet('GloFAS', `https://flood-api.open-meteo.com/v1/flood?latitude=${C13[0]}&longitude=${C13[1]}&daily=river_discharge&forecast_days=35&ensemble=true`),
+  const gf = ([la, lo]) => `https://flood-api.open-meteo.com/v1/flood?latitude=${la}&longitude=${lo}&daily=river_discharge&forecast_days=35&ensemble=true`;
+  const [glofas, glofasL, ec, gfs, api, fd] = await Promise.all([tryGet('GloFAS C.13', gf(C13)), tryGet('GloFAS C.29B', gf(C29B)),
     tryGet('ECMWF', ens('ecmwf_ifs025', 15)), tryGet('GFS', ens('ncep_gefs05', 35)), tryGet('api.php', SITE + 'api.php'), tryGet('FloodDash', 'https://flood.nonarkara.org/api/bulletins')]);
-  const rid = api && api.rid && api.rid.c13 ? {q: api.rid.c13.q, date: api.rid.date} : null;
-  let scale = null;
-  if (glofas && rid) {
-    const i = glofas.daily.time.indexOf(today), g = q(members(glofas.daily, 'river_discharge').map(m => m[i]), .5);
-    if (g > 0) scale = rid.q / g;
-  }
-  if (!scale && !ec && !gfs) throw new Error('ไม่มีข้อมูลเลย');
-  const W = weeks(today, {glofas, scale, ec, gfs}), bul = bulletins(fd);
+  const real = k => api && api.rid && api.rid[k] ? {q: api.rid[k].q, prev: api.rid[k].prev, date: api.rid.date} : null;
+  const rid = real('c13'), low = real('c29b');
+  const fit = (g, r) => { if (!g || !r) return null; const i = g.daily.time.indexOf(today), m = q(members(g.daily, 'river_discharge').map(x => x[i]), .5); return m > 0 ? r.q / m : null; };
+  const scale = fit(glofas, rid), scaleL = fit(glofasL, low);
+  if (!scale && !scaleL && !ec && !gfs) throw new Error('ไม่มีข้อมูลเลย');
+  const W = weeks(today, {glofas, scale, glofasL, scaleL, ec, gfs}), bul = bulletins(fd);
   // แผนระบายเขื่อนที่แบบจำลองไม่รู้: ประกาศกรมชลฯ ที่ยังไม่หมดอายุและเตือนนนทบุรี → สัปดาห์ 1 อย่างน้อยเฝ้าระวัง
   if (bul.some(b => b.nont)) { W[0].lvl = Math.max(W[0].lvl, 1); W[0].bulletin = true; }
-  return {t: new Date().toISOString(), today, c13: rid, scale: scale && +scale.toFixed(3),
+  return {t: new Date().toISOString(), today, c13: rid, c29b: low, scale: scale && +scale.toFixed(3), scaleL: scaleL && +scaleL.toFixed(3),
     th: {watch: Q_WATCH, y54: Q_54, rain: RAIN_WK}, weeks: W, bulletins: bul};
 }
 
 const thD = s => { const d = new Date(s + 'T12:00:00+07:00'); return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]}`; };
 export function message(R) {
   const L = ['<b>🏫 ความเสี่ยงน้ำท่วมโรงเรียนชุมชนวัดบางโค 4 สัปดาห์ข้างหน้า</b>'];
-  if (R.c13) L.push(`น้ำไหลผ่านชัยนาท (C.13) ล่าสุด ${R.c13.q.toLocaleString()} ลบ.ม./วิ`);
+  const tr = x => x.prev == null ? '' : x.q > x.prev ? ` ↑ จาก ${x.prev.toLocaleString()}` : x.q < x.prev ? ` ↓ จาก ${x.prev.toLocaleString()}` : ' คงที่';
+  if (R.c13) L.push(`ชัยนาท (C.13) ${R.c13.q.toLocaleString()} ลบ.ม./วิ${tr(R.c13)}`);
+  if (R.c29b) L.push(`สามโคก ปทุมฯ (C.29B รวมน้ำป่าสัก) ${R.c29b.q.toLocaleString()} ลบ.ม./วิ${tr(R.c29b)}`);
   for (const w of R.weeks) {
     const n = w.north, r = w.rain, b = [];
-    if (n) b.push(`น้ำเหนือ C.13 ~${n.med.toLocaleString()} (โอกาสเกิน ${R.th.watch.toLocaleString()}: ${n.pWatch}%)`);
+    if (n) b.push(`C.13 ~${n.med.toLocaleString()} (เกิน ${R.th.watch.toLocaleString()}: ${n.pWatch}%)`);
+    if (w.lower) b.push(`C.29B ~${w.lower.med.toLocaleString()} (เกิน ${R.th.watch.toLocaleString()}: ${w.lower.pWatch}%)`);
     if (r) b.push(`ฝน ≥${R.th.rain} มม./สัปดาห์ ${r.p}%`);
     if (w.spring.length) b.push(`น้ำเกิด ${thD(w.spring[0])}–${thD(w.spring[w.spring.length - 1])}`);
     L.push('', `${ICON[w.lvl]} <b>${thD(w.from)}–${thD(w.to)}: ${NAMES[w.lvl]}</b>`, b.join(' · '));
@@ -136,7 +142,10 @@ function test() {
   assert(W[0].north.med === 2500 && W[0].north.pWatch === 100 && W[0].rain.src === 'ECMWF' && W[0].rain.p === 78, 'w1 ' + JSON.stringify(W[0]));
   assert(W[0].lvl === 2, 'w1 lvl ' + W[0].lvl);
   assert(W[1].north.p54 === 20 && W[1].lvl === 1 && W[1].rain.p === 0, 'w2 ' + JSON.stringify(W[1]));
-  assert(W[2].rain === null && W[3].north.pWatch === 0, 'w3 ฝนไม่มีแหล่ง / w4 น้ำลด');
+  assert(W[2].rain === null && W[3].north.pWatch === 0 && W[0].lower === null, 'w3 ฝนไม่มีแหล่ง / w4 น้ำลด / ไม่มี C.29B');
+  // C.29B เกินเกณฑ์ (น้ำป่าสัก) แม้ C.13 ต่ำ → ดันระดับได้
+  const WL = weeks('2026-10-01', {glofas, scale: 0.2, glofasL: glofas, scaleL: 0.6, ec: null, gfs: null});
+  assert(WL[0].north.pWatch === 0 && WL[0].lower.pWatch === 100 && WL[0].lvl === 1, 'lower ' + JSON.stringify(WL[0]));
   assert(message({c13: {q: 2200}, th: {watch: 2500, rain: 100}, weeks: W}).includes('🟠'), 'msg');
   const fd = {bulletins: [{title_th: 'กรมชลฯ เพิ่มระบาย', area_th: 'ลุ่มเจ้าพระยาตอนล่าง', expires_at: '2026-10-01T00:00:00+07:00', items: [{th: 'แจ้งเตือน ปทุมธานี นนทบุรี'}]},
     {title_th: 'เก่า', area_th: 'เจ้าพระยา', expires_at: '2026-09-01T00:00:00+07:00'}, {title_th: 'ภาคใต้', area_th: 'พัทลุง'}]};
