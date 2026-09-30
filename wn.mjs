@@ -114,6 +114,11 @@ export async function logLine(W) {
     const a = await get(SITE + 'api.php');
     L.obs = (a.rain || []).filter(r => r.km <= 10).map(r => ({name: r.name, km: r.km, r1: r.r1, r24: r.r24, dt: r.dt}));
   } catch (e) { console.log('wn log: obs ข้าม —', e.cause?.code || e.message); }
+  // เรดาร์ที่โรงเรียน (rain.mjs) 4 ชม. ล่าสุด — รอบบันทึกห่าง ~3 ชม. ซ้อนกันได้ score.mjs รวมให้เอง
+  try {
+    const R = JSON.parse(fs.readFileSync(`${OUT}/radar.json`, 'utf8')), cut = Date.now() / 1000 - 4 * 3600;
+    L.radar = Object.fromEntries(Object.entries(R).filter(([t]) => +t >= cut));
+  } catch { L.radar = null; }
   return L;
 }
 

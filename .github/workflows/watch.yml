@@ -20,7 +20,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            for f in gauge.json gauge-pakkret.json outlook.json rid.json wn.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            for f in gauge.json gauge-pakkret.json outlook.json rid.json wn.json radar.json score.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
           fi
       - name: check
         env:
@@ -59,6 +59,12 @@ jobs:
         run: |
           command -v pdftotext >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils >/dev/null)
           node rid.mjs
+      - name: radar rain at school (ground truth for score)
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          OUT_DIR: site
+        run: node rain.mjs
       - name: WeatherNext heavy-rain odds (every 3h)
         continue-on-error: true
         timeout-minutes: 3
@@ -80,6 +86,7 @@ jobs:
           git clone -q --depth=1 -b fclog "$U" fclog 2>/dev/null || { mkdir -p fclog && git -C fclog init -q -b fclog; }
           cat site/fclog-line.json >> "fclog/$(TZ=Asia/Bangkok date +%Y-%m).jsonl"
           rm -f site/fclog-line.json
+          node score.mjs fclog fclog/score.json && cp fclog/score.json site/score.json || true
           cd fclog && git add -A
           git -c user.name=bangkho-watch -c user.email=actions@users.noreply.github.com commit -qm "fclog $(TZ=Asia/Bangkok date '+%F %H:%M')"
           git push -q "$U" fclog
