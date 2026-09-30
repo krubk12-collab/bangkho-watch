@@ -63,6 +63,14 @@ export function weeks(start, {glofas, scale, ec, gfs}) {
   return W;
 }
 
+// ประกาศปฏิบัติการน้ำ (กรมชลฯ ฯลฯ) จาก SLIC FloodDash — CC-BY-4.0 ต้องให้เครดิต · เจ้าของเว็บส่งต่อจากข่าว ไม่ใช่ API ทางการ
+export function bulletins(fd, now = Date.now()) {
+  const txt = b => b.title_th + b.area_th + JSON.stringify(b.items || []);
+  return ((fd && fd.bulletins) || []).filter(b => (!b.expires_at || Date.parse(b.expires_at) > now) && /เจ้าพระยา|ป่าสัก|นนทบุรี/.test(txt(b)))
+    .slice(0, 4).map(b => ({title: b.title_th, at: b.published_at, until: b.expires_at, by: b.publisher_th,
+      nont: /นนทบุรี/.test(txt(b)), items: (b.items || []).map(i => i.th).slice(0, 8)}));
+}
+
 async function get(url) {
   for (let k = 0; ; k++) {
     try { const r = await fetch(url, {signal: AbortSignal.timeout(40000)}); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
@@ -74,9 +82,9 @@ const tryGet = async (name, url) => { try { return await get(url); } catch (e) {
 async function build() {
   const today = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
   const ens = (m, days) => `https://ensemble-api.open-meteo.com/v1/ensemble?latitude=${SCHOOL[0]}&longitude=${SCHOOL[1]}&daily=precipitation_sum&forecast_days=${days}&models=${m}&timezone=Asia/Bangkok`;
-  const [glofas, ec, gfs, api] = await Promise.all([
+  const [glofas, ec, gfs, api, fd] = await Promise.all([
     tryGet('GloFAS', `https://flood-api.open-meteo.com/v1/flood?latitude=${C13[0]}&longitude=${C13[1]}&daily=river_discharge&forecast_days=35&ensemble=true`),
-    tryGet('ECMWF', ens('ecmwf_ifs025', 15)), tryGet('GFS', ens('ncep_gefs05', 35)), tryGet('api.php', SITE + 'api.php')]);
+    tryGet('ECMWF', ens('ecmwf_ifs025', 15)), tryGet('GFS', ens('ncep_gefs05', 35)), tryGet('api.php', SITE + 'api.php'), tryGet('FloodDash', 'https://flood.nonarkara.org/api/bulletins')]);
   const rid = api && api.rid && api.rid.c13 ? {q: api.rid.c13.q, date: api.rid.date} : null;
   let scale = null;
   if (glofas && rid) {
@@ -84,8 +92,11 @@ async function build() {
     if (g > 0) scale = rid.q / g;
   }
   if (!scale && !ec && !gfs) throw new Error('ไม่มีข้อมูลเลย');
+  const W = weeks(today, {glofas, scale, ec, gfs}), bul = bulletins(fd);
+  // แผนระบายเขื่อนที่แบบจำลองไม่รู้: ประกาศกรมชลฯ ที่ยังไม่หมดอายุและเตือนนนทบุรี → สัปดาห์ 1 อย่างน้อยเฝ้าระวัง
+  if (bul.some(b => b.nont)) { W[0].lvl = Math.max(W[0].lvl, 1); W[0].bulletin = true; }
   return {t: new Date().toISOString(), today, c13: rid, scale: scale && +scale.toFixed(3),
-    th: {watch: Q_WATCH, y54: Q_54, rain: RAIN_WK}, weeks: weeks(today, {glofas, scale, ec, gfs})};
+    th: {watch: Q_WATCH, y54: Q_54, rain: RAIN_WK}, weeks: W, bulletins: bul};
 }
 
 const thD = s => { const d = new Date(s + 'T12:00:00+07:00'); return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]}`; };
@@ -99,6 +110,7 @@ export function message(R) {
     if (w.spring.length) b.push(`น้ำเกิด ${thD(w.spring[0])}–${thD(w.spring[w.spring.length - 1])}`);
     L.push('', `${ICON[w.lvl]} <b>${thD(w.from)}–${thD(w.to)}: ${NAMES[w.lvl]}</b>`, b.join(' · '));
   }
+  if (R.bulletins && R.bulletins.length) L.push('', '<b>📢 ประกาศกรมชลฯ ที่ยังมีผล</b>', ...R.bulletins.map(b => '• ' + b.title), '<i>ผ่าน SLIC FloodDash (flood.nonarkara.org, CC-BY-4.0)</i>');
   return L.join('\n') + `\n\n🔗 ${SITE}#risk3w\n<i>ประเมินจากแบบจำลอง (GloFAS/ECMWF/GFS) ความแม่นลดลงตามระยะ สัปดาห์ 3–4 เป็นแนวโน้ม · ไม่ใช่ประกาศทางการ ติดตามกรมชลประทาน/ปภ.</i>`;
 }
 
@@ -126,6 +138,10 @@ function test() {
   assert(W[1].north.p54 === 20 && W[1].lvl === 1 && W[1].rain.p === 0, 'w2 ' + JSON.stringify(W[1]));
   assert(W[2].rain === null && W[3].north.pWatch === 0, 'w3 ฝนไม่มีแหล่ง / w4 น้ำลด');
   assert(message({c13: {q: 2200}, th: {watch: 2500, rain: 100}, weeks: W}).includes('🟠'), 'msg');
+  const fd = {bulletins: [{title_th: 'กรมชลฯ เพิ่มระบาย', area_th: 'ลุ่มเจ้าพระยาตอนล่าง', expires_at: '2026-10-01T00:00:00+07:00', items: [{th: 'แจ้งเตือน ปทุมธานี นนทบุรี'}]},
+    {title_th: 'เก่า', area_th: 'เจ้าพระยา', expires_at: '2026-09-01T00:00:00+07:00'}, {title_th: 'ภาคใต้', area_th: 'พัทลุง'}]};
+  const B = bulletins(fd, Date.parse('2026-09-30T12:00:00+07:00'));
+  assert(B.length === 1 && B[0].nont, 'bulletins ' + JSON.stringify(B));
   console.log('risk3w.mjs test ผ่าน');
 }
 
