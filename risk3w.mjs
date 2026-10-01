@@ -113,7 +113,7 @@ export function message(R) {
     if (n) b.push(`C.13 ~${n.med.toLocaleString()} (เกิน ${R.th.watch.toLocaleString()}: ${n.pWatch}%)`);
     if (w.lower) b.push(`C.29B ~${w.lower.med.toLocaleString()} (เกิน ${R.th.watch.toLocaleString()}: ${w.lower.pWatch}%)`);
     if (r) b.push(`ฝน ≥${R.th.rain} มม./สัปดาห์ ${r.p}%`);
-    if (w.spring.length) b.push(`น้ำเกิด ${thD(w.spring[0])}–${thD(w.spring[w.spring.length - 1])}`);
+    if (w.spring.length) b.push(`น้ำทะเลหนุน ${thD(w.spring[0])}–${thD(w.spring[w.spring.length - 1])}`);
     L.push('', `${ICON[w.lvl]} <b>${thD(w.from)}–${thD(w.to)}: ${NAMES[w.lvl]}</b>`, b.join(' · '));
   }
   if (R.bulletins && R.bulletins.length) L.push('', '<b>📢 ประกาศกรมชลฯ ที่ยังมีผล</b>', ...R.bulletins.map(b => '• ' + b.title), '<i>ผ่าน SLIC FloodDash (flood.nonarkara.org, CC-BY-4.0)</i>');
