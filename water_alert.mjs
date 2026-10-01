@@ -52,11 +52,21 @@ for (let i = 0; i < 3; i++) {
   catch (e) { r = null; why = e.cause?.code || e.message; }
   if (!why) break;
 }
+const st = readState() || {};
+// api.php พัง/ข้อมูลค้าง (เคย 500 เพราะ สสน. ส่ง JSON บวม 1ต.ค.69) — api ส่งแคชเก่าแทนเอง แต่ต้องรู้ตัว: ค้าง >60 นาที หรือไม่ตอบ 3 รอบติด = แจ้ง
+const ageMin = r?.D?.updated ? (Date.now() - new Date(r.D.updated.replace(' ', 'T') + '+07:00')) / 6e4 : null;
+const apiBad = !r?.D?.stations || ageMin > 60;
+st.apiFail = apiBad ? (st.apiFail || 0) + 1 : 0;
+if (apiBad && st.apiFail >= 3 && !st.apiDown) {
+  await send(`⚠️ <b>ข้อมูลระดับน้ำบนเว็บไม่อัปเดต</b>\n${ageMin ? `ค่าล่าสุดเมื่อ ${Math.round(ageMin)} นาทีก่อน (เว็บแสดงค่าเก่าอยู่)` : `api.php ไม่ตอบ (${why})`}\nตรวจ: ${SITE}api.php?force=1\n<i>แจ้ง Claude ว่า "api น้ำค้าง" ให้ตรวจ</i>`);
+  st.apiDown = true;
+} else if (!apiBad && st.apiDown) {
+  await send('✅ ข้อมูลระดับน้ำบนเว็บกลับมาอัปเดตตามปกติแล้ว'); st.apiDown = false;
+}
 // เว็บล่ม watch.py แจ้งอยู่แล้ว · ข้อมูลขาดห้ามคำนวณ ไม่งั้นระดับตกเพราะข้อมูลหาย
-if (why) { console.log('water: ข้ามรอบนี้ (ลอง 3 ครั้ง) —', why); process.exit(0); }
+if (why) { saveState(st); console.log('water: ข้ามรอบนี้ (ลอง 3 ครั้ง) —', why); process.exit(0); }
 
 const a = r.a, now = new Date().toISOString();
-const st = readState() || {};
 // ยืนยัน 2 รอบติดกันก่อนแจ้ง (กันค่าที่แกว่งชั่วคราว) — ยกเว้นขึ้นเป็นวิกฤตแจ้งทันที
 const seen = st.pendingLvl === a.lvl ? (st.pendingCount || 0) + 1 : 1;
 let sent = false;
@@ -84,6 +94,6 @@ saveState({
   gistdaSeen: gSeen,
   lvl: a.lvl, name: a.name, checkedAt: now,
   alertedLvl: sent ? a.lvl : st.alertedLvl, alertedAt: sent ? now : st.alertedAt,
-  pendingLvl: a.lvl, pendingCount: seen,
+  pendingLvl: a.lvl, pendingCount: seen, apiFail: st.apiFail, apiDown: st.apiDown,
 });
 console.log(`water: ระดับ ${a.lvl}${sent ? ' (ส่งแจ้งเตือนแล้ว)' : ''}`);
