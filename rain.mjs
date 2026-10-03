@@ -3,6 +3,7 @@
 // ภาพย้อนหลังมีแค่ ~2 ชม. ทุกรอบเก็บเฟรมที่ยังไม่มีไว้ (รอบ 10 นาทีเลื่อนได้ ไม่พลาดถ้าไม่หายเกิน 2 ชม.)
 import fs from 'fs';
 import zlib from 'zlib';
+import {pathToFileURL} from 'url';
 
 const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/radar.json`;
@@ -97,4 +98,4 @@ async function main() {
   const last = Math.max(...Object.keys(R).map(Number));
   console.log(`rain: เฟรมใหม่ ${n} · ล่าสุด ${R[last]} dBZ · เก็บ ${Object.keys(R).length} เฟรม`);
 }
-await main();
+if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();   // import จาก goto.mjs ไม่รัน main

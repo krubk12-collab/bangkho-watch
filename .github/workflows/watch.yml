@@ -20,7 +20,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            for f in gauge.json gauge-pakkret.json outlook.json rid.json wn.json radar.json score.json risk3w.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            for f in gauge.json gauge-pakkret.json outlook.json rid.json wn.json radar.json score.json risk3w.json goto_ai.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
           fi
       - name: check
         env:
@@ -111,6 +111,14 @@ jobs:
           OUT_DIR: site
           NODE_OPTIONS: --dns-result-order=ipv4first
         run: node outlook.mjs
+      - name: trip AI summary for /water/goto (3 Oct 69 only)
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OUT_DIR: site
+          NODE_OPTIONS: --dns-result-order=ipv4first
+        run: node goto.mjs
       - name: publish status page
         run: |
           cp page/index.html site/index.html
