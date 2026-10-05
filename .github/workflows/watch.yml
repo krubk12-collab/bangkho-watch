@@ -20,7 +20,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            for f in gauge.json gauge-pakkret.json outlook.json rid.json wn.json radar.json score.json risk3w.json goto_ai.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json score.json risk3w.json goto_ai.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
           fi
       - name: check
         env:
@@ -40,7 +40,7 @@ jobs:
         run: node water_alert.mjs
       - name: staff gauge Nonthaburi pier (AI)
         continue-on-error: true
-        timeout-minutes: 3
+        timeout-minutes: 4
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           CAM_KEY: ${{ secrets.CAM_KEY }}

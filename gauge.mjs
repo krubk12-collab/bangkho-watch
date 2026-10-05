@@ -26,9 +26,16 @@ const CAMS = [
     relay: 'https://bangkho.ac.th/water/cam.php',
     crop: 'crop=90:480:715:0,scale=270:1440:flags=lanczos', web: 'crop=420:420:520:0',
     prompt: `River staff gauge (yellow, E-pattern, black marks every 2 cm, labels every 10 cm). From the top: 50,40,30,20,10, a meter joint, then 90,80,...,30. The part above the joint is the 3-meter range ("50" = 3.50 m), below it the 2-meter range ("80" = 2.80 m). Labels continue below 30 (20, 10, ...) and the gauge goes down INTO the water; the thin white line under it is only a reflection. Find where the WATER SURFACE meets the yellow gauge and read the level in meters (2 decimals), e.g. water at the "20" label below the joint = 2.20. If the view is dark/blurred/pointing elsewhere set visible=false.`},
+  // ไม้วัดหน้าเทศบาลเมืองปทุมธานี (ต้นน้ำของนนท์ ~20 กม.) มีป้ายระดับสูงสุดของปีติดไว้ — marks = [ระดับบนไม้, ชื่อ] กะจากภาพ 5ต.ค.69 ±3 ซม. (ป้ายปี 53/64/65 ห่างกันไม่เกิน 6 ซม. รวมเป็นเส้นเดียว)
+  // ระดับอ้างอิงยังไม่ยืนยันว่าเป็น ม.รทก. → ref:false · แจ้ง Telegram เมื่อถึงระดับปี 53/64/65 (~3.00) และปี 54 (4.00)
+  {id: 'pathum', name: 'เทศบาลเมืองปทุมธานี', file: 'gauge-pathum', ref: false, levels: [3.00, 4.00],
+    marks: [[2.50, 'ลูกศรแดง'], [3.00, 'ปี 53/64/65'], [4.00, 'ปี 54']],
+    stream: 'http://101.109.253.60:8999/playlist.m3u8',
+    crop: 'crop=60:420:262:40,scale=180:1260:flags=lanczos', web: 'crop=220:420:180:30',
+    prompt: `River staff gauge (yellow, E-pattern, black marks every 2 cm, labels every 10 cm). From the top: a big "4" (= 4.00 m), then 90,80,...,10, then a big "3" just below the 3.00 m joint, then 90,80,70,60,50,40,... (the 2-meter range, "50" = 2.50 m). Ignore the blue year signs and the red arrow beside it. Find where the WATER SURFACE meets the yellow gauge and read the level in meters (2 decimals). If the water is below the bottom of the gauge set below_gauge=true. If the view is dark/blurred/pointing elsewhere set visible=false.`},
 ];
 
-const ZONE = ['ต่ำกว่าป้าย', 'เฝ้าระวัง', 'วิกฤต'];
+const ZONE =['ต่ำกว่าป้าย', 'เฝ้าระวัง', 'วิกฤต'];
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 
 async function grab(c) {
@@ -107,7 +114,7 @@ async function runCam(c, pk) {
   if (why) rec.why = why;
   if (rec.ok && c.zones) rec.zone = c.zones.filter(z => rec.m >= z - 0.005).length;   // 0 ต่ำกว่าป้าย, 1 เฝ้าระวัง, 2 วิกฤต
   G.h.push(rec);
-  Object.assign(G, {pk, levels: c.levels, zones: c.zones, name: c.name});
+  Object.assign(G, {pk, levels: c.levels, zones: c.zones, marks: c.marks, name: c.name});
 
   // ป้ายข้างไม้วัด: น้ำถึงขั้นเดิม 2 รอบติด → แจ้ง (ขั้นเดียวกันซ้ำได้หลัง 12 ชม.)
   const [p1, p2] = G.h.slice(-2).filter(h => h.ok), z = Math.min(p1?.zone ?? 0, p2?.zone ?? 0), zk = 'z' + z;
@@ -123,8 +130,8 @@ async function runCam(c, pk) {
     const rise = hourAgo ? Math.round((x - hourAgo.m) * 100) : null;
     const msgs = [];
     for (const L of c.levels) {   // ข้ามขึ้นเหนือระดับ แจ้งซ้ำได้อีกเมื่อผ่านไป 12 ชม. (น้ำขึ้นลงวันละ 2 รอบ)
-      const k = String(L);
-      if (x >= L && (!G.alerts[k] || now - G.alerts[k] > 12 * 3600e3)) { msgs.push(`ถึง ${L.toFixed(2)} ม. แล้ว`); G.alerts[k] = now; }
+      const k = String(L), yr = (c.marks || []).filter(m => Math.abs(m[0] - L) <= 0.03 && m[1].startsWith('ปี')).map(m => m[1].slice(3));
+      if (x >= L && (!G.alerts[k] || now - G.alerts[k] > 12 * 3600e3)) { msgs.push(`ถึง ${L.toFixed(2)} ม.${yr.length ? ` (ระดับสูงสุดปี ${yr.join('/')})` : ''} แล้ว`); G.alerts[k] = now; }
     }
     if (rise != null && rise >= RISE_CM_1H && (!G.alerts.rise || now - G.alerts.rise > 3 * 3600e3)) {
       msgs.push(`ขึ้นเร็ว +${rise} ซม. ใน 1 ชม.`); G.alerts.rise = now;
@@ -139,7 +146,7 @@ async function runCam(c, pk) {
 
 async function main() {
   const pk = await pakKret();
-  for (const c of CAMS) await runCam(c, pk).catch(e => console.log(c.id + ': ' + e.message.split('\n')[0]));   // กล้องหนึ่งพังไม่ลากอีกตัว
+  for (const c of CAMS.filter(c => !process.env.ONLY || c.id === process.env.ONLY)) await runCam(c, pk).catch(e => console.log(c.id + ': ' + e.message.split('\n')[0]));   // กล้องหนึ่งพังไม่ลากอีกตัว
 }
 
 if (process.argv[1]?.endsWith('gauge.mjs') && process.argv[2] !== 'test') await main();
