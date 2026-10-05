@@ -29,7 +29,7 @@ const CAMS = [
   // ไม้วัดหน้าเทศบาลเมืองปทุมธานี (ต้นน้ำของนนท์ ~20 กม.) มีป้ายระดับสูงสุดของปีติดไว้ — marks = [ระดับบนไม้, ชื่อ] กะจากภาพ 5ต.ค.69 ±3 ซม. (ป้ายปี 53/64/65 ห่างกันไม่เกิน 6 ซม. รวมเป็นเส้นเดียว)
   // ระดับอ้างอิงยังไม่ยืนยันว่าเป็น ม.รทก. → ref:false · แจ้ง Telegram เมื่อถึงระดับปี 53/64/65 (~3.00) และปี 54 (4.00)
   {id: 'pathum', name: 'เทศบาลเมืองปทุมธานี', file: 'gauge-pathum', ref: false, levels: [3.00, 4.00],
-    marks: [[2.50, 'ลูกศรแดง'], [3.00, 'ปี 53/64/65'], [4.00, 'ปี 54']],
+    marks: [[2.50, 'เฝ้าระวัง'], [3.00, 'ปี 53/64/65'], [4.00, 'ปี 54']],
     stream: 'http://101.109.253.60:8999/playlist.m3u8',
     crop: 'crop=60:420:262:40,scale=180:1260:flags=lanczos', web: 'crop=220:420:180:30',
     prompt: `River staff gauge (yellow, E-pattern, black marks every 2 cm, labels every 10 cm). From the top: a big "4" (= 4.00 m), then 90,80,...,10, then a big "3" just below the 3.00 m joint, then 90,80,70,60,50,40,... (the 2-meter range, "50" = 2.50 m). Ignore the blue year signs and the red arrow beside it. Find where the WATER SURFACE meets the yellow gauge and read the level in meters (2 decimals). If the water is below the bottom of the gauge set below_gauge=true. If the view is dark/blurred/pointing elsewhere set visible=false.`},
