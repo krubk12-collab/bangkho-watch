@@ -20,7 +20,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json score.json risk3w.json goto_ai.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json score.json risk3w.json goto_ai.json wapi.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
           fi
       - name: check
         env:
@@ -30,6 +30,15 @@ jobs:
           LINE_NOTIFY_KEY: ${{ secrets.LINE_NOTIFY_KEY }}
           OUT_DIR: site
         run: python watch.py
+      - name: water api mirror (/water/api.php → wapi.json, ใช้แทนตอน PHP โฮสต์ล่ม)
+        # สำเนา api.php+dwr.php ใน water-php/ — แก้ ../water/api.php แล้วต้อง cp มาที่นี่ด้วย
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          mkdir -p water-php/data
+          [ -s site/wapi.json ] && cp site/wapi.json water-php/data/cache.json   # กราฟรอบก่อน (PREV) ตอน สสน. กราฟล่ม
+          php -d date.timezone=Asia/Bangkok -d memory_limit=1G -r '$_GET["force"]=1; require "water-php/api.php";' > /tmp/w.json
+          php -r 'exit(isset(json_decode(file_get_contents("/tmp/w.json"), true)["stations"]) ? 0 : 1);' && mv /tmp/w.json site/wapi.json
       - name: water alert (Telegram)
         continue-on-error: true      # เตือนน้ำพลาดต้องไม่ทำให้หน้าสถานะเว็บหยุด
         env:
