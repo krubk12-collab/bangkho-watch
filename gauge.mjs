@@ -15,20 +15,20 @@ const dry = process.env.DRY_RUN === '1';
 const JSON_ASK = 'Reply JSON only: {"visible":bool,"level_m":number|null,"below_gauge":bool,"confidence":0-1,"note":"short"}';
 // crop = ตำแหน่งไม้วัดในภาพ (ถ้ากล้องขยับ แก้ตรงนี้) · web = กรอบรูปโชว์บนเว็บ · ref = เทียบกับสถานีปากเกร็ด สสน. ได้ไหม (ต้องใช้ระดับอ้างอิงเดียวกัน)
 const CAMS = [
-  {id: 'nont', name: 'ท่าน้ำนนท์', file: 'gauge', ref: true, levels: LEVELS,
+  {id: 'nont', name: 'ท่าน้ำนนท์', file: 'gauge', ref: true, every: 30, levels: LEVELS,
     stream: 'https://stream.firsttech.co.th/live/nakornnont.stream/playlist.m3u8',
     crop: 'crop=160:600:410:0,scale=480:1800:flags=lanczos', web: 'crop=300:560:330:0',
     prompt: `This is a river staff gauge (Thai style, E-pattern, black marks every 2 cm, labels every 10 cm: 90,80,...,10 then a meter mark, then 90,80,...). The lower segment runs 2.00–2.90 m (labels 90..10 then 2.00 at its bottom end; e.g. "50" means 2.50 m); the upper segment is 3.00–3.90 m. Ignore the red/yellow painted post beside the gauge and the blue pipe; read only where water meets the white gauge face. Find where the WATER SURFACE meets the gauge and read the level in meters (2 decimals). If the water line is not visible, the gauge is hidden/blurred, or the camera is pointing elsewhere, set visible=false.`},
   // ไม้วัดปากเกร็ดใช้ระดับอ้างอิงคนละแบบกับ สสน. (ไม้ 2.20 ตอน สสน. 2.49) — ไม่เทียบกัน ใช้ป้ายของท่าเองแทน
   // zones = ป้ายข้างไม้วัดเทียบตัวเลขบนไม้ (ลูกพี่ดูจากกล้อง 27ก.ย.69): กลางป้าย "เฝ้าระวัง" ≈ 2.20, กลางป้าย "วิกฤต" ≈ 2.90
-  {id: 'pakkret', name: 'ท่าน้ำปากเกร็ด', file: 'gauge-pakkret', ref: false, levels: [], zones: [2.20, 2.90],
+  {id: 'pakkret', name: 'ท่าน้ำปากเกร็ด', file: 'gauge-pakkret', ref: false, every: 120, levels: [], zones: [2.20, 2.90],
     // กล้องรับเฉพาะ IP ไทย → ให้โฮสต์ bangkho.ac.th ส่งต่อ 500KB แรกของท่อนล่าสุด (cam.php + secret CAM_KEY)
     relay: 'https://bangkho.ac.th/water/cam.php',
     crop: 'crop=90:480:715:0,scale=270:1440:flags=lanczos', web: 'crop=420:420:520:0',
     prompt: `River staff gauge (yellow, E-pattern, black marks every 2 cm, labels every 10 cm). From the top: 50,40,30,20,10, a meter joint, then 90,80,...,30. The part above the joint is the 3-meter range ("50" = 3.50 m), below it the 2-meter range ("80" = 2.80 m). Labels continue below 30 (20, 10, ...) and the gauge goes down INTO the water; the thin white line under it is only a reflection. Find where the WATER SURFACE meets the yellow gauge and read the level in meters (2 decimals), e.g. water at the "20" label below the joint = 2.20. If the view is dark/blurred/pointing elsewhere set visible=false.`},
   // ไม้วัดหน้าเทศบาลเมืองปทุมธานี (ต้นน้ำของนนท์ ~20 กม.) มีป้ายระดับสูงสุดของปีติดไว้ — marks = [ระดับบนไม้, ชื่อ] กะจากภาพ 5ต.ค.69 ±3 ซม. (ป้ายปี 53/64/65 ห่างกันไม่เกิน 6 ซม. รวมเป็นเส้นเดียว)
   // ระดับอ้างอิงยังไม่ยืนยันว่าเป็น ม.รทก. → ref:false · แจ้ง Telegram เมื่อถึงระดับปี 53/64/65 (~3.00) และปี 54 (4.00)
-  {id: 'pathum', name: 'เทศบาลเมืองปทุมธานี', file: 'gauge-pathum', ref: false, levels: [3.00, 4.00],
+  {id: 'pathum', name: 'เทศบาลเมืองปทุมธานี', file: 'gauge-pathum', ref: false, every: 30, levels: [3.00, 4.00],
     marks: [[2.50, 'เฝ้าระวัง'], [3.00, 'ปี 53/64/65'], [4.00, 'ปี 54']],
     stream: 'http://101.109.253.60:8999/playlist.m3u8',
     crop: 'crop=60:420:262:40,scale=180:1260:flags=lanczos', web: 'crop=220:420:180:30',
@@ -107,6 +107,10 @@ async function runCam(c, pk) {
   const now = Date.now(), FILE = `${OUT}/${c.file}.json`;
   const G = readJson(FILE, {h: [], alerts: {}});
   G.h = G.h.filter(h => now - Date.parse(h.t) < KEEP_H * 3600e3);
+  // 💸 ประหยัด Gemini: workflow รันทุก 10 นาที แต่ส่งภาพให้ AI ตามรอบของกล้อง (every นาที) — เผื่อ 5 นาทีกัน Actions เลื่อนเวลา
+  // ปากเกร็ด 2 ชม. เพราะอ่านไม่ผ่านแทบทุกครั้ง (4/427 ณ 11ต.ค.69) · กลางคืนยังอ่าน เพราะนนท์/ปทุมอ่านกลางคืนได้จริง
+  const lastT = G.h.length ? Date.parse(G.h[G.h.length - 1].t) : 0;
+  if (process.env.FORCE !== '1' && now - lastT < ((c.every || 10) - 5) * 60e3) { console.log(c.id + ': ยังไม่ถึงรอบ'); return; }
   let v, why;
   try { v = await ask(c, await grab(c)); } catch (e) { why = 'ดึงภาพ/อ่านไม่สำเร็จ'; console.log(c.id + ':', e.message.split('\n')[0]); }
   why = why || reject(v, G.h, c.ref ? pk : null, now);

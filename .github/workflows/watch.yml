@@ -112,22 +112,15 @@ jobs:
           cd fclog && git add -A
           git -c user.name=bangkho-watch -c user.email=actions@users.noreply.github.com commit -qm "fclog $(TZ=Asia/Bangkok date '+%F %H:%M')"
           git push -q "$U" fclog
-      - name: 7-day outlook (AI, every 3h)
+      - name: 7-day outlook (AI DeepSeek/Groq, every 6h)
         continue-on-error: true
         timeout-minutes: 5
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OUT_DIR: site
           NODE_OPTIONS: --dns-result-order=ipv4first
         run: node outlook.mjs
-      - name: trip AI summary for /water/goto (3 Oct 69 only)
-        continue-on-error: true
-        timeout-minutes: 3
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          OUT_DIR: site
-          NODE_OPTIONS: --dns-result-order=ipv4first
-        run: node goto.mjs
       - name: publish status page
         run: |
           cp page/index.html site/index.html

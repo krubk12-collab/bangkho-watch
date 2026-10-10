@@ -2,14 +2,20 @@
 // ตัวเลขพยากรณ์ (ฝน/เมฆ/ความกดอากาศ/ลม/พายุฟ้าคะนอง/ฝนสะสม) จาก Open-Meteo ECMWF+GFS · ภาพแผนที่อากาศกรมอุตุฯ + Himawari + ฝนพยากรณ์ สสน.
 // + ระดับเฝ้าระวังจาก assess.js + น้ำขึ้นลงคลอง + เขื่อน + ดาวเทียม GISTDA + ไม้วัด AI + หัวข่าว
 // ผลเป็น "ความเห็นประกอบ" เท่านั้น ไม่ขับระดับเตือนภัย (ระดับยังมาจาก assess.js ที่เดียว)
-// env: GEMINI_API_KEY, OUT_DIR (outlook.json), FORCE=1 (ไม่รอครบ 3 ชม.) · repo สาธารณะ ห้าม print คีย์
+// env: DEEPSEEK_API_KEY, GROQ_API_KEY, OUT_DIR (outlook.json), FORCE=1 (ไม่รอครบ 6 ชม.) · repo สาธารณะ ห้าม print คีย์
 import fs from 'node:fs';
 
 const SITE = 'https://bangkho.ac.th/water/';
 const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/outlook.json`;
-const EVERY_H = 3;                        // ponytail: ถามทุก 3 ชม. พอ — พยากรณ์ ECMWF/GFS อัปเดตวันละ 2–4 รอบ
-const MODELS = ['gemini-3.1-pro-preview', 'gemini-flash-latest'];
+const EVERY_H = 6;                        // ponytail: ถามทุก 6 ชม. พอ — พยากรณ์ ECMWF/GFS อัปเดตวันละ 2–4 รอบ
+// 💸 11ต.ค.69 ย้ายจาก Gemini Pro → DeepSeek (ถูกกว่ามาก) สำรองด้วย Groq ฟรี · ทั้งคู่อ่านภาพไม่ได้ → ตัดภาพแผนที่อากาศออก ใช้ตัวเลขพยากรณ์ล้วน
+const PROVIDERS = [
+  {name: 'deepseek-chat', url: 'https://api.deepseek.com/chat/completions', key: 'DEEPSEEK_API_KEY',
+   body: {model: 'deepseek-chat', response_format: {type: 'json_object'}}},
+  {name: 'groq qwen3.8-27b', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY',
+   body: {model: 'qwen/qwen3.8-27b', response_format: {type: 'json_object'}, reasoning_effort: 'none'}},
+];
 const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return d; } };
 // Open-Meteo ต่อจาก runner GitHub ไม่ติดบางครั้ง (UND_ERR_CONNECT_TIMEOUT) → ลองซ้ำ 3 รอบ
 async function get(u, ms = 30000) {
@@ -103,7 +109,7 @@ const PROMPT = `คุณเป็นผู้ช่วยวิเคราะ�
 ผู้อ่านคือครู ผู้ปกครอง ผู้สูงอายุ — ต้องไม่ประมาท แต่ห้ามทำให้ตื่นตระหนก: ใช้ภาษาเรียบ ๆ บอกข้อเท็จจริงและสิ่งที่ควรทำ ไม่ใช้คำเร้าอารมณ์
 ประมวลทุกข้อมูลด้านล่าง: ตัวเลขพยากรณ์ 7 วัน (ฝน ECMWF เทียบ GFS, ความน่าจะเป็นฝน, เมฆ, ความกดอากาศต่ำสุด, ลม/ลมกระโชก, CAPE, ชั่วโมงพายุฝนฟ้าคะนอง) ที่โรงเรียนและต้นน้ำ,
 % โอกาสฝนหนักจาก Google WeatherNext 2 (64 ชุด ensemble — ใช้บอกความไม่แน่นอน ถ้า % ต่ำแต่ ECMWF/GFS ฝนมาก = มีโอกาสแต่ไม่แน่นอน, ถ้าเห็นตรงกันความมั่นใจสูงขึ้น; เป็นแบบจำลองทดลอง ใช้ประกอบ),
-ภาพแผนที่อากาศ/ดาวเทียม/ฝนพยากรณ์ที่แนบ (ดูร่องมรสุม หย่อมความกดอากาศต่ำ พายุ แนวฝน ว่าจะมาทางไทยตอนกลางไหม), ระดับน้ำคลอง/แม่น้ำ, น้ำขึ้นลงเทียบตลิ่ง, น้ำเหนือ C.13, เขื่อน, น้ำทะเลหนุน, ดาวเทียมน้ำท่วม, หัวข่าว
+ระดับน้ำคลอง/แม่น้ำ, น้ำขึ้นลงเทียบตลิ่ง, น้ำเหนือ C.13, เขื่อน, น้ำทะเลหนุน, ดาวเทียมน้ำท่วม, หัวข่าว
 เกณฑ์ risk รายวัน (ให้ตรงกับระดับของเว็บ): 0 ปกติ · 1 เฝ้าระวัง · 2 เตือนภัย · 3 วิกฤต
 - ระดับ 2 ขึ้นไปต้องมีหลักฐานชัด เช่น ฝนพยากรณ์ที่โรงเรียนเกิน 90 มม./วัน ที่ ECMWF และ GFS เห็นตรงกัน, หรือน้ำคลองเกินตลิ่งแม้ช่วงน้ำลง, หรือ C.13 เกิน 2,500 และยังเพิ่ม ร่วมกับน้ำทะเลหนุนสูง
 - คลองล้นตลิ่งเฉพาะช่วงยอดน้ำขึ้นแล้วลดลงต่ำกว่าตลิ่ง = เฝ้าระวัง
@@ -111,23 +117,24 @@ const PROMPT = `คุณเป็นผู้ช่วยวิเคราะ�
 ตอบ JSON เท่านั้น ภาษาไทย:
 {"trend":"ดีขึ้น|ทรงตัว|ต้องจับตา|แย่ลง","headline":"ประโยคเดียว ไม่เกิน 90 ตัวอักษร","summary":"3-4 ประโยค อธิบายภาพรวมว่าทำไม",
 "days":[{"date":"YYYY-MM-DD","risk":0,"rain":"เช่น ฝนเล็กน้อย 5–10 มม.","note":"สั้น ๆ เช่น น้ำขึ้นสูงช่วงเย็น"}],
-"weather":"สรุปภาพแผนที่อากาศ: มรสุม/ร่องความกดอากาศ/พายุ/ลม 1-2 ประโยค","upstream":"น้ำเหนือจะมาเพิ่มไหม เมื่อไร 1-2 ประโยค",
+"weather":"สรุปลักษณะอากาศจากตัวเลข (ความกดอากาศ ลม พายุฝนฟ้าคะนอง) 1-2 ประโยค","upstream":"น้ำเหนือจะมาเพิ่มไหม เมื่อไร 1-2 ประโยค",
 "watch":["สิ่งที่ต้องจับตา สูงสุด 4 ข้อ"],"advice":"คำแนะนำสำหรับโรงเรียน 1-2 ประโยค","confidence":"สูง|ปานกลาง|ต่ำ","why_confidence":"สั้น ๆ"}
 days ต้องครบ 7 วันตามวันที่ในพยากรณ์`;
 
-async function askAI(parts) {
+async function askAI(prompt) {
   let last;
-  for (const m of MODELS) {
+  for (const p of PROVIDERS) {
     try {
-      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-        method: 'POST', headers: {'content-type': 'application/json'}, signal: AbortSignal.timeout(180000),
-        body: JSON.stringify({contents: [{parts}], generationConfig: {responseMimeType: 'application/json', temperature: 0.2}})});
+      if (!process.env[p.key]) throw new Error(`${p.name} ไม่มีคีย์`);
+      const r = await fetch(p.url, {
+        method: 'POST', headers: {'content-type': 'application/json', authorization: `Bearer ${process.env[p.key]}`}, signal: AbortSignal.timeout(180000),
+        body: JSON.stringify({...p.body, temperature: 0.2, max_tokens: 3000, messages: [{role: 'user', content: prompt}]})});
       const j = await r.json();
-      const t = j.candidates?.[0]?.content?.parts?.filter(p => !p.thought).map(p => p.text).join('');
-      if (!t) throw new Error(`${m} ${j.error?.code || r.status}`);
-      const v = JSON.parse(t);
-      if (!Array.isArray(v.days) || !v.headline) throw new Error(`${m} รูปแบบผิด`);
-      return {...v, model: m};
+      const t = j.choices?.[0]?.message?.content;
+      if (!t) throw new Error(`${p.name} ${j.error?.code || j.error?.message?.slice(0, 40) || r.status}`);
+      const v = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
+      if (!Array.isArray(v.days) || !v.headline) throw new Error(`${p.name} รูปแบบผิด`);
+      return {...v, model: p.name};
     } catch (e) { last = e; console.log('outlook:', String(e.message).slice(0, 80)); }
   }
   throw last;
@@ -137,17 +144,14 @@ async function run() {
   const prev = readJson(FILE, null);
   if (process.env.FORCE !== '1' && prev?.t && Date.now() - Date.parse(prev.t) < EVERY_H * 36e5 - 10 * 6e4) { console.log('outlook: ยังไม่ครบรอบ'); return prev; }
   const [ctx, fc] = await Promise.all([context().catch(e => { throw new Error('ข้อมูลน้ำ: ' + (e.cause?.code || e.message)); }), forecast().catch(e => { throw new Error('พยากรณ์: ' + (e.cause?.code || e.message)); })]);
-  const imgs = await images(ctx.D);
-  const parts = [{text: PROMPT + '\n\nข้อมูลสถานการณ์ปัจจุบัน:\n' + JSON.stringify(ctx.text) + '\n\nตัวเลขพยากรณ์รายวัน 7 วัน:\n' + JSON.stringify(fc)},
-    ...imgs.flatMap(i => [{text: 'ภาพ: ' + i.name}, i.part])];
-  const v = await askAI(parts);
+  const v = await askAI(PROMPT + '\n\nข้อมูลสถานการณ์ปัจจุบัน:\n' + JSON.stringify(ctx.text) + '\n\nตัวเลขพยากรณ์รายวัน 7 วัน:\n' + JSON.stringify(fc));
   // ระดับรายวันต้องอยู่ 0–3 และวันแรกไม่ต่ำกว่าระดับที่สูตรคิดตอนนี้ (AI ห้ามบอกว่าปลอดภัยกว่าข้อมูลจริง)
   const W = globalThis.WaterAssess, now = W.NAMES.indexOf(ctx.text.level_by_formula);
   v.days = v.days.slice(0, 7).map((d, i) => ({...d, risk: Math.max(0, Math.min(3, Math.round(+d.risk || 0)), i === 0 ? now : 0)}));
-  const out = {t: new Date().toISOString(), level_now: now, images: imgs.map(i => i.name), ...v,
+  const out = {t: new Date().toISOString(), level_now: now, images: [], ...v,
     fc: fc[0].days.map(d => ({date: d.date, ecmwf: d.ecmwf_mm, gfs: d.gfs_mm, prob: d.rain_prob_max, thunder: d.thunder_hours, gust: d.gust_max_kmh}))};
   fs.writeFileSync(FILE, JSON.stringify(out, null, 1));
-  console.log(`outlook: ${out.model} ภาพ ${imgs.length} · ${out.trend}`);
+  console.log(`outlook: ${out.model} · ${out.trend}`);
   return out;
 }
 
