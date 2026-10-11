@@ -62,7 +62,8 @@ async function ask(c, imgs, n = 0) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`, {
     method: 'POST', headers: {'content-type': 'application/json'},
     body: JSON.stringify({contents: [{parts: [{text: c.prompt + ' ' + JSON_ASK}, ...imgs.map(data => ({inlineData: {mimeType: 'image/png', data}}))]}],
-      generationConfig: {responseMimeType: 'application/json', temperature: 0}})});
+      // thinkingLevel low: ทดสอบ 11ต.ค.69 อ่านค่าเท่าค่าเริ่มต้น (ปทุมฯ 2.68-2.70 / 2.69) แต่โทเค็นคิด (คิดเงินราคาขาออก) ลด ~1,100-3,000 → ~550-1,200 · minimal รุ่นนี้ไม่รองรับ
+      generationConfig: {responseMimeType: 'application/json', temperature: 0, thinkingConfig: {thinkingLevel: 'low'}}})});
   const j = await r.json();
   const t = j.candidates?.[0]?.content?.parts?.map(p => p.text).join('');
   // 503/500 = Google โหลดเต็มชั่วคราว ลองใหม่อีก 2 ครั้งห่าง 20 วิ (429 โควตาเต็ม ลองซ้ำไม่ช่วย)
