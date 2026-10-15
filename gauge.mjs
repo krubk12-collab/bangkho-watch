@@ -58,14 +58,20 @@ async function grab(c) {
   return imgs;
 }
 
+// คีย์โปรเจกต์ฟรี (ไม่ผูกบัตร, 15ต.ค.69) ก่อน — โควตาฟรีหมด (429) / คีย์ใช้ไม่ได้ → คีย์เสียเงินเดิม
+// ภาพไม้วัดเป็นกล้องสาธารณะ ระดับฟรี Google เอาไปเทรนได้ไม่เป็นไร · ห้ามเอาคีย์ฟรีไปใช้กับข้อมูลครู/นักเรียน
+let freeOk = !!process.env.GEMINI_FREE_KEY;
 async function ask(c, imgs, n = 0) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+  const free = freeOk;
+  const key = free ? process.env.GEMINI_FREE_KEY : process.env.GEMINI_API_KEY;
+  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`, {
     method: 'POST', headers: {'content-type': 'application/json'},
     body: JSON.stringify({contents: [{parts: [{text: c.prompt + ' ' + JSON_ASK}, ...imgs.map(data => ({inlineData: {mimeType: 'image/png', data}}))]}],
       // thinkingLevel low: ทดสอบ 11ต.ค.69 อ่านค่าเท่าค่าเริ่มต้น (ปทุมฯ 2.68-2.70 / 2.69) แต่โทเค็นคิด (คิดเงินราคาขาออก) ลด ~1,100-3,000 → ~550-1,200 · minimal รุ่นนี้ไม่รองรับ
       generationConfig: {responseMimeType: 'application/json', temperature: 0, thinkingConfig: {thinkingLevel: 'low'}}})});
   const j = await r.json();
   const t = j.candidates?.[0]?.content?.parts?.map(p => p.text).join('');
+  if (!t && free && [400, 401, 403, 429].includes(r.status)) { console.log('คีย์ฟรีใช้ไม่ได้ (' + r.status + ') ใช้คีย์เสียเงิน'); freeOk = false; return ask(c, imgs, n); }
   // 503/500 = Google โหลดเต็มชั่วคราว ลองใหม่อีก 2 ครั้งห่าง 20 วิ (429 โควตาเต็ม ลองซ้ำไม่ช่วย)
   if (!t && r.status >= 500 && n < 2) { await new Promise(s => setTimeout(s, 20000)); return ask(c, imgs, n + 1); }
   if (!t) throw new Error('gemini ' + (j.error?.code || r.status));
