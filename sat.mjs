@@ -1,4 +1,4 @@
-// 🛰️🧪 เมฆก่อตัวรอบโรงเรียนจากดาวเทียม Himawari-9 (อินฟราเรด B13 ของ JMA) → satci.json {validtime วินาที: [จุด, กม., ทิศ 0-7, สว่างสุด]} เก็บ 14 วัน
+// 🛰️🧪 เมฆก่อตัวรอบโรงเรียนจากดาวเทียม Himawari-9 (อินฟราเรด B13 ของ JMA) → satci.json {validtime วินาที: [จุด, กม., ทิศ 0-7, สว่างสุด, dBZ จริงที่ รร. 60 นาทีถัดไป]} เก็บ 14 วัน
 // หลัก: ยอดเมฆที่พุ่งสูงจะเย็นลง = ภาพอินฟราเรดสว่างขึ้นเร็ว · นับจุด (ซูม 5 ~4.75 กม./จุด) รัศมี ~62 กม. ที่ สว่าง ≥90 และสว่างขึ้น ≥20 ใน 20 นาที
 // เกณฑ์ตั้งจากข้อมูลจริง 15ต.ค.69: ฝนเข้า รร. 13:40 ดาวเทียมเห็นตั้งแต่ 12:50 · แต่ฝนลูกเล็ก 11:30 วันเดียวกันดาวเทียมไม่เห็นเลย (เล็กกว่า 1 จุด)
 // ไฟล์นี้มีไว้ "บันทึก" เทียบกับ radar.json (ฝนจริงที่ รร.) ก่อนเอาป้าย 🧪 ออก — หน้าเว็บคำนวณเองสดใน /water/wxcard.js (satCI ต้องตรงกัน)
@@ -54,6 +54,13 @@ async function main() {
     if (S[t]) continue;
     try { const r = satCI(await img(tt[k]), await img(tt[k - 2])); S[t] = [r.n, r.km, r.dir, r.v]; n++; }
     catch (e) { console.log('sat: เฟรม', tt[k].validtime, 'ข้าม —', e.message); }
+  }
+  // เฉลยย้อนหลัง: ฝนจริงที่ รร. สูงสุดใน 60 นาทีหลังภาพ (radar.json จาก rain.mjs ที่รันก่อนขั้นนี้ เก็บแค่ 72 ชม. เลยจดติดไว้ที่นี่)
+  const RD = (() => { try { return JSON.parse(fs.readFileSync(`${OUT}/radar.json`, 'utf8')); } catch { return {}; } })();
+  const rmax = Math.max(0, ...Object.keys(RD).map(Number));
+  for (const [t, e] of Object.entries(S)) if (e.length === 4 && +t + 3600 <= rmax) {
+    const z = Object.entries(RD).filter(([k]) => +k > +t && +k <= +t + 3600).map(([, v]) => v);
+    if (z.length) e.push(Math.max(...z));
   }
   const cut = Date.now() / 1000 - KEEP_S;
   for (const t of Object.keys(S)) if (+t < cut) delete S[t];
