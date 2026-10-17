@@ -27,8 +27,8 @@ jobs:
         env:
           DA_USER: ${{ secrets.DA_USER }}
           DA_PASS: ${{ secrets.DA_PASS }}
-          LINE_NOTIFY_URL: ${{ secrets.LINE_NOTIFY_URL }}
-          LINE_NOTIFY_KEY: ${{ secrets.LINE_NOTIFY_KEY }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
         run: python watch.py
       - name: water api mirror (/water/api.php → wapi.json, ใช้แทนตอน PHP โฮสต์ล่ม)

@@ -1,9 +1,9 @@
 """ตัวเฝ้า bangkho.ac.th — รันบน GitHub Actions ทุก 10 นาที (สร้างหลังโฮสต์ระงับบัญชี 15 ก.ย.69)
 
 อ่าน access log สดจาก DirectAdmin + ยอดแบนด์วิดท์รายเดือน + ลองเปิดหน้าเว็บจริง
-→ เกินเกณฑ์ส่ง LINE (ผ่าน GAS notify ตัวเดียวกับ daily-digest) → เขียน status.json ให้หน้าสถานะ
+→ เกินเกณฑ์ส่ง Telegram (บอทเดียวกับเตือนน้ำ) → เขียน status.json ให้หน้าสถานะ
 
-env: DA_USER DA_PASS LINE_NOTIFY_URL LINE_NOTIFY_KEY · OUT_DIR (ค่าเริ่มต้น site) · DRY_RUN=1 = พิมพ์แทนส่ง LINE
+env: DA_USER DA_PASS TG_TOKEN TG_CHAT · OUT_DIR (ค่าเริ่มต้น site) · DRY_RUN=1 = พิมพ์แทนส่ง Telegram
 repo นี้เป็นสาธารณะ: ห้าม print IP/ข้อความเตือนลง log ของ Actions · IP ใน status.json/state.json ต้องปิดบังเสมอ
 """
 import base64, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
@@ -256,7 +256,7 @@ def probe_all(state):
         elif s["level"] == "warn":
             alert(state, f'sys:{s["sys"]}', f'🟡 {s["name"]} — เว็บเข้าได้ แต่ {s.get("pipe_name", "ท่อ")} มีปัญหา: {s["detail"] or "เช็คไม่ผ่าน"}', 6)
         elif prev is False:
-            send_line(f'🟢 {s["name"]} กลับมาปกติแล้ว\n{PAGE_URL}')
+            send_tg(f'🟢 {s["name"]} กลับมาปกติแล้ว\n{PAGE_URL}')
             state.get("sent", {}).pop(f'sys:{s["sys"]}', None)
         was[s["sys"]] = s["ok"]
     return systems
@@ -293,15 +293,15 @@ def read_log():
     return rows
 
 
-def send_line(text):
+def send_tg(text):
     if DRY:
         print("[DRY] " + text.replace("\n", " | "))
         return
-    q = urllib.parse.urlencode({"action": "notify", "key": os.environ["LINE_NOTIFY_KEY"], "text": text})
+    q = urllib.parse.urlencode({"chat_id": os.environ["TG_CHAT"], "text": text, "disable_web_page_preview": "true"})
     try:
-        http(f'{os.environ["LINE_NOTIFY_URL"]}?{q}', timeout=60)
+        http(f'https://api.telegram.org/bot{os.environ["TG_TOKEN"]}/sendMessage?{q}', timeout=60)
     except Exception as e:
-        print("ส่ง LINE ไม่สำเร็จ:", type(e).__name__)
+        print("ส่ง Telegram ไม่สำเร็จ:", type(e).__name__)   # ห้าม print e — URL มี token
 
 
 def alert(state, key, text, cooldown_h):
@@ -311,7 +311,7 @@ def alert(state, key, text, cooldown_h):
     sent[key] = time.time()
     state.setdefault("alerts", []).insert(0, {"t": now.isoformat(timespec="minutes"), "kind": key.split(":")[0], "text": mask(text)})
     del state["alerts"][30:]
-    send_line(f"⚠️ bangkho.ac.th\n{text}\nดูสถานะ: {PAGE_URL}")
+    send_tg(f"⚠️ bangkho.ac.th\n{text}\nดูสถานะ: {PAGE_URL}")
 
 
 def main():
@@ -334,7 +334,7 @@ def main():
         alert(state, "down", f"🔴 เว็บมีปัญหา — {what}", 1)
         state["down_since"] = state.get("down_since") or now.isoformat(timespec="minutes")
     elif state.get("down_since"):
-        send_line(f"✅ bangkho.ac.th กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['down_since'][11:16]} น.)\n{PAGE_URL}")
+        send_tg(f"✅ bangkho.ac.th กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['down_since'][11:16]} น.)\n{PAGE_URL}")
         state.pop("down_since")
         state.get("sent", {}).pop("down", None)
 
