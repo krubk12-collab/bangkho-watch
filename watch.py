@@ -456,7 +456,9 @@ def main():
         }
         status["hours"] = [{"h": h, "bytes": hours[h]} for h in sorted(hours)[-48:]]
     except Exception as e:
-        status["errors"].append(f"อ่าน log สดไม่ได้: {type(e).__name__}")
+        # โฮสต์หมุนไฟล์ log ตอนเที่ยงคืน → DirectAdmin ตอบ error ชั่วคราว (เจอรอบ 00:10 18ต.ค.69 รอบถัดไปปกติ)
+        if not (now.hour == 0 and now.minute < 20):
+            status["errors"].append(f"อ่าน log สดไม่ได้: {type(e).__name__} {getattr(e, 'code', '')}".strip())
 
     if status["errors"] and not bad:   # เว็บล่มแจ้งไปแล้วด้านบน ไม่ต้องแจ้งซ้ำ
         alert(state, "watch_error", "🛠️ ตัวเฝ้าทำงานไม่ครบ: " + "; ".join(status["errors"]), 6)
