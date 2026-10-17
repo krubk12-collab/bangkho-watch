@@ -1,6 +1,6 @@
 // อ่านไม้วัดระดับน้ำจากกล้อง CCTV (ท่าน้ำนนท์ + ท่าน้ำปากเกร็ด) ด้วย Gemini แล้วเก็บเป็นกราฟ + แจ้ง Telegram
 // ขั้นตอน: ffmpeg ดึง 1 เฟรมจากสตรีม → ครอปเฉพาะไม้วัด ขยาย 3 เท่า → Gemini ตอบ JSON → กรองค่าที่ไม่น่าเชื่อ
-// env: GEMINI_API_KEY, CAM_KEY, TG_TOKEN, TG_CHAT, OUT_DIR (<file>.json + <file>.jpg ต่อกล้อง), DRY_RUN=1 (ไม่ส่ง Telegram)
+// env: AI_HUB_GAUGE, GEMINI_FREE_KEY, GEMINI_API_KEY, CAM_KEY, TG_TOKEN, TG_CHAT, OUT_DIR (<file>.json + <file>.jpg ต่อกล้อง), DRY_RUN=1 (ไม่ส่ง Telegram)
 // repo สาธารณะ → ห้าม print คีย์/เนื้อหาข้อความลง log
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -58,20 +58,29 @@ async function grab(c) {
   return imgs;
 }
 
-// คีย์โปรเจกต์ฟรี (ไม่ผูกบัตร, 15ต.ค.69) ก่อน — โควตาฟรีหมด (429) / คีย์ใช้ไม่ได้ → คีย์เสียเงินเดิม
-// ภาพไม้วัดเป็นกล้องสาธารณะ ระดับฟรี Google เอาไปเทรนได้ไม่เป็นไร · ห้ามเอาคีย์ฟรีไปใช้กับข้อมูลครู/นักเรียน
-let freeOk = !!process.env.GEMINI_FREE_KEY;
+// ai-hub (ใช้คีย์โปรเจกต์ฟรีฝั่ง hub + นับโทเค็นให้ /apihub) → คีย์ฟรีตรง → คีย์เสียเงิน · ขั้นไหนใช้ไม่ได้ก็ตกขั้นถัดไปถาวรในรอบนี้
+// คีย์ฟรี (ไม่ผูกบัตร, 15ต.ค.69): ภาพไม้วัดเป็นกล้องสาธารณะ ระดับฟรี Google เอาไปเทรนได้ไม่เป็นไร · ห้ามเอาคีย์ฟรีไปใช้กับข้อมูลครู/นักเรียน
+const GEN = 'v1beta/models/gemini-flash-latest:generateContent';
+const tiers = [['https://ai-hub.krubk12.workers.dev/gemini/', process.env.AI_HUB_GAUGE, 'hub'],
+  ['https://generativelanguage.googleapis.com/', process.env.GEMINI_FREE_KEY, 'คีย์ฟรี'],
+  ['https://generativelanguage.googleapis.com/', process.env.GEMINI_API_KEY, 'คีย์เสียเงิน']].filter(t => t[1]);
 async function ask(c, imgs, n = 0) {
-  const free = freeOk;
-  const key = free ? process.env.GEMINI_FREE_KEY : process.env.GEMINI_API_KEY;
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${key}`, {
-    method: 'POST', headers: {'content-type': 'application/json'},
-    body: JSON.stringify({contents: [{parts: [{text: c.prompt + ' ' + JSON_ASK}, ...imgs.map(data => ({inlineData: {mimeType: 'image/png', data}}))]}],
-      // thinkingLevel low: ทดสอบ 11ต.ค.69 อ่านค่าเท่าค่าเริ่มต้น (ปทุมฯ 2.68-2.70 / 2.69) แต่โทเค็นคิด (คิดเงินราคาขาออก) ลด ~1,100-3,000 → ~550-1,200 · minimal รุ่นนี้ไม่รองรับ
-      generationConfig: {responseMimeType: 'application/json', temperature: 0, thinkingConfig: {thinkingLevel: 'low'}}})});
+  const [base, key, name] = tiers[0];
+  let r;
+  try {
+    r = await fetch(base + GEN, {
+      method: 'POST', headers: {'content-type': 'application/json', 'x-goog-api-key': key}, signal: name === 'hub' ? AbortSignal.timeout(150000) : undefined,   // Gemini ฟรีตอบช้า ~75 วิ (18ต.ค.)
+      body: JSON.stringify({contents: [{parts: [{text: c.prompt + ' ' + JSON_ASK}, ...imgs.map(data => ({inlineData: {mimeType: 'image/png', data}}))]}],
+        // thinkingLevel low: ทดสอบ 11ต.ค.69 อ่านค่าเท่าค่าเริ่มต้น (ปทุมฯ 2.68-2.70 / 2.69) แต่โทเค็นคิด (คิดเงินราคาขาออก) ลด ~1,100-3,000 → ~550-1,200 · minimal รุ่นนี้ไม่รองรับ
+        generationConfig: {responseMimeType: 'application/json', temperature: 0, thinkingConfig: {thinkingLevel: 'low'}}})});
+  } catch (e) {
+    if (tiers.length > 1) { console.log(`${name} ต่อไม่ติด (${e.name}) ใช้ขั้นถัดไป`); tiers.shift(); return ask(c, imgs, n); }
+    throw e;
+  }
   const j = await r.json();
   const t = j.candidates?.[0]?.content?.parts?.map(p => p.text).join('');
-  if (!t && free && [400, 401, 403, 429].includes(r.status)) { console.log('คีย์ฟรีใช้ไม่ได้ (' + r.status + ') ใช้คีย์เสียเงิน'); freeOk = false; return ask(c, imgs, n); }
+  if (!t && tiers.length > 1 && ([400, 401, 403, 429].includes(r.status) || (name === 'hub' && r.status >= 500))) {
+    console.log(`${name} ใช้ไม่ได้ (${r.status}) ใช้ขั้นถัดไป`); tiers.shift(); return ask(c, imgs, n); }
   // 503/500 = Google โหลดเต็มชั่วคราว ลองใหม่อีก 2 ครั้งห่าง 20 วิ (429 โควตาเต็ม ลองซ้ำไม่ช่วย)
   if (!t && r.status >= 500 && n < 2) { await new Promise(s => setTimeout(s, 20000)); return ask(c, imgs, n + 1); }
   if (!t) throw new Error('gemini ' + (j.error?.code || r.status));

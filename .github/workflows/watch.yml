@@ -78,6 +78,7 @@ jobs:
         continue-on-error: true
         timeout-minutes: 4
         env:
+          AI_HUB_GAUGE: ${{ secrets.AI_HUB_GAUGE }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_FREE_KEY: ${{ secrets.GEMINI_FREE_KEY }}
           CAM_KEY: ${{ secrets.CAM_KEY }}
