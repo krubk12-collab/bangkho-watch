@@ -153,7 +153,7 @@ def probe_php(slug, cfg):
     r["cid"] = (h.get("login") or {}).get("client_id")
     d = h.get("data") or {}
     r["files"], r["newest"], r["age_h"] = d.get("files"), d.get("newest"), d.get("age_h")
-    r["counts"] = {f["f"]: f["n"] for f in d.get("top", []) if f.get("n") is not None}
+    r["counts"] = {f: n for f, n in (d.get("n") or {x["f"]: x["n"] for x in d.get("top", [])}).items() if n is not None}
 
     problems = list(h.get("note") or []) if not h.get("ok") else []
     for fname, least in (cfg.get("min") or {}).items():

@@ -90,6 +90,7 @@ if (!is_dir($data)) {
         'newest' => $newest ? date('Y-m-d H:i', $newest) : null,
         'age_h'  => $newest ? round((time() - $newest) / 3600, 1) : null,
         'top'    => array_slice($files, 0, TOP),
+        'n'      => array_column($files, 'n', 'f'),   // record ทุกไฟล์ — ไฟล์เล็กที่หลุด top (photo/albums.json) ก็เช็คเกณฑ์ min ได้
     ];
     if (!$files) {
         $out['ok'] = false;
