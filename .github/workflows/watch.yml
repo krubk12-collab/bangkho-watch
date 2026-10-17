@@ -21,6 +21,7 @@ jobs:
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
             for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json satci.json score.json risk3w.json goto_ai.json wapi.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            git archive FETCH_HEAD w 2>/dev/null | tar -x -C site 2>/dev/null || true   # สำเนา PHP อื่นรอบก่อน (ต้นทางพังรอบนี้ยังมีของเดิม)
           fi
       - name: check
         env:
@@ -39,6 +40,24 @@ jobs:
           [ -s site/wapi.json ] && cp site/wapi.json water-php/data/cache.json   # กราฟรอบก่อน (PREV) ตอน สสน. กราฟล่ม
           php -d date.timezone=Asia/Bangkok -d memory_limit=1G -r '$_GET["force"]=1; require "water-php/api.php";' > /tmp/w.json
           php -r 'exit(isset(json_decode(file_get_contents("/tmp/w.json"), true)["stations"]) ? 0 : 1);' && mv /tmp/w.json site/wapi.json
+      - name: water php mirror (news/air/gistda/cams → w/, ใช้แทนตอน PHP โฮสต์ล่ม)
+        # สำเนาใน water-php/ — แก้ ../water/{news,air,gistda,cams}.php แล้วต้อง cp มาที่นี่ด้วย · dwr ใช้ wapi.json .dwr แทน
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          mkdir -p site/w water-php/data
+          ok() { php -r 'exit(isset(json_decode(file_get_contents($argv[1]), true)[$argv[2]]) ? 0 : 1);' "$1" "$2"; }
+          php -r 'require "water-php/news.php";' > /tmp/n.json; ok /tmp/n.json items && mv /tmp/n.json site/w/news.json
+          php -r 'require "water-php/air.php";' > /tmp/a.json; ok /tmp/a.json st && mv /tmp/a.json site/w/air.json
+          if [ "$(date +%M)" -lt 10 ] || [ ! -s site/w/gistda.json ]; then   # GISTDA ชั่วโมงละครั้ง (เท่าแคชบนโฮสต์)
+            php -r 'require "water-php/gistda.php";' > /tmp/g.json; ok /tmp/g.json updated && mv /tmp/g.json site/w/gistda.json
+            [ -s water-php/data/gistda_cells.json ] && cp water-php/data/gistda_cells.json site/w/gistda_cells.json
+          fi
+          for id in pt1 pt2 pom pridi pyf rsit nA1 nA6 nA7 nA8 nA10 kbb kbk lbl; do
+            ( php -r '$_GET["id"]=$argv[1]; require "water-php/cams.php";' "$id" > /tmp/c_$id.jpg
+              [ "$(stat -c%s /tmp/c_$id.jpg)" -gt 3000 ] && mv /tmp/c_$id.jpg site/w/cam_$id.jpg ) &
+          done; wait
+          ls -la site/w
       - name: water alert (Telegram)
         continue-on-error: true      # เตือนน้ำพลาดต้องไม่ทำให้หน้าสถานะเว็บหยุด
         env:
