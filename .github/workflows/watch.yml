@@ -58,6 +58,12 @@ jobs:
               [ "$(stat -c%s /tmp/c_$id.jpg)" -gt 3000 ] && mv /tmp/c_$id.jpg site/w/cam_$id.jpg ) &
           done; wait
           ls -la site/w
+      - name: radio playlist mirror (/keep เพลย์ลิสต์อัตโนมัติ → w/radio.json, ฟังได้ตอน PHP โฮสต์ล่ม)
+        continue-on-error: true
+        timeout-minutes: 1
+        run: |
+          K=https://bangkho.ac.th/keep/api.php
+          curl -sf --max-time 20 "$K?action=list" -o /tmp/kl.json && curl -sf --max-time 20 "$K?action=remoteState" -o /tmp/ks.json             && node radio.mjs /tmp/kl.json /tmp/ks.json site/w/radio.json
       - name: water alert (Telegram)
         continue-on-error: true      # เตือนน้ำพลาดต้องไม่ทำให้หน้าสถานะเว็บหยุด
         env:
