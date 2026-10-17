@@ -2,7 +2,7 @@
 // ตัวเลขพยากรณ์ (ฝน/เมฆ/ความกดอากาศ/ลม/พายุฟ้าคะนอง/ฝนสะสม) จาก Open-Meteo ECMWF+GFS · ภาพแผนที่อากาศกรมอุตุฯ + Himawari + ฝนพยากรณ์ สสน.
 // + ระดับเฝ้าระวังจาก assess.js + น้ำขึ้นลงคลอง + เขื่อน + ดาวเทียม GISTDA + ไม้วัด AI + หัวข่าว
 // ผลเป็น "ความเห็นประกอบ" เท่านั้น ไม่ขับระดับเตือนภัย (ระดับยังมาจาก assess.js ที่เดียว)
-// env: DEEPSEEK_API_KEY, GROQ_API_KEY, OUT_DIR (outlook.json), FORCE=1 (ไม่รอครบ 6 ชม.) · repo สาธารณะ ห้าม print คีย์
+// env: AI_HUB_TOKEN, DEEPSEEK_API_KEY, GROQ_API_KEY, OUT_DIR (outlook.json), FORCE=1 (ไม่รอครบ 6 ชม.) · repo สาธารณะ ห้าม print คีย์
 import fs from 'node:fs';
 
 const SITE = 'https://bangkho.ac.th/water/';
@@ -10,7 +10,10 @@ const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/outlook.json`;
 const EVERY_H = 6;                        // ponytail: ถามทุก 6 ชม. พอ — พยากรณ์ ECMWF/GFS อัปเดตวันละ 2–4 รอบ
 // 💸 11ต.ค.69 ย้ายจาก Gemini Pro → DeepSeek (ถูกกว่ามาก) สำรองด้วย Groq ฟรี · ทั้งคู่อ่านภาพไม่ได้ → ตัดภาพแผนที่อากาศออก ใช้ตัวเลขพยากรณ์ล้วน
+// ai-hub มาก่อน (นับโทเค็นให้ /apihub) · hub ล่มก็ตกไปเรียกค่ายตรงด้วยคีย์เดิม
 const PROVIDERS = [
+  {name: 'hub deepseek-chat', url: 'https://ai-hub.krubk12.workers.dev/v1/chat/completions', key: 'AI_HUB_TOKEN',
+   body: {model: 'deepseek-chat', response_format: {type: 'json_object'}}},
   {name: 'deepseek-chat', url: 'https://api.deepseek.com/chat/completions', key: 'DEEPSEEK_API_KEY',
    body: {model: 'deepseek-chat', response_format: {type: 'json_object'}}},
   {name: 'groq qwen3.8-27b', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY',
