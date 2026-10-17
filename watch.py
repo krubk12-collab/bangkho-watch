@@ -140,6 +140,7 @@ def probe_php(slug, cfg):
          "pipe_name": "ข้อมูลในระบบ", "ok": False, "site": True, "detail": "", "cid": None}
     t0 = time.time()
     code, body = fetch(f"{SITE}/{slug}/health.php", timeout=25)
+    r["code"] = code
     try:
         h = json.loads(body)
     except ValueError:
@@ -246,11 +247,25 @@ def probe_all(state):
             if s.get("cid") and s["cid"] != main_cid:
                 s["ok"] = False
                 s["detail"] = (s["detail"] + " · " if s["detail"] else "") + f"client_id ล็อกอินไม่ตรงกับระบบอื่น ({s['cid']})"
+    # PHP ล่มทั้งบัญชี (PHP-FPM ไม่ขึ้น 7,17ต.ค.69): health.php ตอบ 5xx เกินครึ่ง → เตือนข้อความเดียว ไม่ไล่เตือนทีละระบบ
+    php = [s for s in systems if s["kind"] == "php"]
+    php5 = {s["sys"] for s in php if s.get("code", 0) >= 500}
+    if len(php5) * 2 > len(php):
+        alert(state, "php", f"🔴 PHP ล่มทั้งเว็บ — ประตูตรวจตอบ 5xx {len(php5)}/{len(php)} ระบบ (หน้า static ยังเปิดได้ · ระบบที่บันทึกข้อมูลใช้ไม่ได้)", 1)
+        state["php_down_since"] = state.get("php_down_since") or now.isoformat(timespec="minutes")
+    else:
+        php5 = set()
+        if state.get("php_down_since"):
+            send_tg(f"✅ PHP กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['php_down_since'][11:16]} น.)\n{PAGE_URL}")
+            state.pop("php_down_since")
+            state.get("sent", {}).pop("php", None)
     # ไฟ 3 สี: 🟢 เว็บเข้าได้และท่อใช้งานได้ · 🟡 เว็บเข้าได้แต่ท่อมีปัญหา · 🔴 เว็บเข้าไม่ได้เลย
     was = state.setdefault("sys_ok", {})
     for s in systems:
         s["level"] = "ok" if s["ok"] else "warn" if s.get("site") else "down"
         prev = was.get(s["sys"])
+        if s["sys"] in php5:
+            continue                                     # รวมอยู่ในข้อความ PHP ล่มแล้ว
         if s["level"] == "down":
             alert(state, f'sys:{s["sys"]}', f'🔴 {s["name"]} — เข้าเว็บไม่ได้เลย ({s["detail"] or "ไม่ตอบ"})', 6)
         elif s["level"] == "warn":
@@ -323,12 +338,20 @@ def main():
         state = {}
     status = {"updated": now.isoformat(timespec="seconds"), "limits": LIMITS, "errors": []}
 
+    # 1.5) ท่อรายระบบ — ทะเบียนนักเรียน/ครู, ล็อกอิน, บันทึกสถิติ, GAS หลังเปลือก
+    try:
+        status["systems"] = probe_all(state)
+    except Exception as e:
+        status["errors"].append(f"ตรวจระบบย่อยไม่สำเร็จ: {type(e).__name__}")
+
     # 1) หน้าเว็บจริงยังเปิดได้ไหม
     checks = check_site()
     status["checks"] = checks
     bad = [c for c in checks if not c["ok"]]
     suspended = any(c["note"] == "ถูกระงับบัญชี" for c in checks)
-    if bad:
+    if bad and state.get("php_down_since") and all(c["code"] >= 500 for c in bad):
+        pass                                             # หน้าที่ 503 มาจาก PHP ล่ม — แจ้งในข้อความ PHP แล้ว
+    elif bad:
         what = "โฮสต์ระงับบัญชี (แบนด์วิดท์/ทรัพยากรเกิน)" if suspended else \
             "เปิดไม่ได้: " + ", ".join(f'{c["path"]} ({c["code"] or c["note"]})' for c in bad)
         alert(state, "down", f"🔴 เว็บมีปัญหา — {what}", 1)
@@ -337,12 +360,6 @@ def main():
         send_tg(f"✅ bangkho.ac.th กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['down_since'][11:16]} น.)\n{PAGE_URL}")
         state.pop("down_since")
         state.get("sent", {}).pop("down", None)
-
-    # 1.5) ท่อรายระบบ — ทะเบียนนักเรียน/ครู, ล็อกอิน, บันทึกสถิติ, GAS หลังเปลือก
-    try:
-        status["systems"] = probe_all(state)
-    except Exception as e:
-        status["errors"].append(f"ตรวจระบบย่อยไม่สำเร็จ: {type(e).__name__}")
 
     # 2) ยอดรายเดือน + พื้นที่ดิสก์ (DirectAdmin สรุปวันละครั้ง)
     try:
