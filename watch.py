@@ -251,12 +251,14 @@ def probe_all(state):
     php = [s for s in systems if s["kind"] == "php"]
     php5 = {s["sys"] for s in php if s.get("code", 0) >= 500}
     if len(php5) * 2 > len(php):
-        alert(state, "php", f"🔴 PHP ล่มทั้งเว็บ — ประตูตรวจตอบ 5xx {len(php5)}/{len(php)} ระบบ (หน้า static ยังเปิดได้ · ระบบที่บันทึกข้อมูลใช้ไม่ได้)", 1)
+        alert(state, "php", f"🔴 PHP ล่มทั้งเว็บ — ประตูตรวจตอบ 5xx {len(php5)}/{len(php)} ระบบ (หน้า static ยังเปิดได้ · ระบบที่บันทึกข้อมูลใช้ไม่ได้)", 1, line=True)
         state["php_down_since"] = state.get("php_down_since") or now.isoformat(timespec="minutes")
     else:
         php5 = set()
         if state.get("php_down_since"):
-            send_tg(f"✅ PHP กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['php_down_since'][11:16]} น.)\n{PAGE_URL}")
+            msg = f"✅ PHP กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['php_down_since'][11:16]} น.)\n{PAGE_URL}"
+            send_tg(msg)
+            send_line(msg)
             state.pop("php_down_since")
             state.get("sent", {}).pop("php", None)
     # ไฟ 3 สี: 🟢 เว็บเข้าได้และท่อใช้งานได้ · 🟡 เว็บเข้าได้แต่ท่อมีปัญหา · 🔴 เว็บเข้าไม่ได้เลย
@@ -319,14 +321,29 @@ def send_tg(text):
         print("ส่ง Telegram ไม่สำเร็จ:", type(e).__name__)   # ห้าม print e — URL มี token
 
 
-def alert(state, key, text, cooldown_h):
+def send_line(text):
+    """LINE มีลิมิตข้อความ/เดือน — ใช้เฉพาะเรื่องสำคัญ (PHP ล่ม/กลับมา) ผ่าน GAS notify ตัวเดียวกับ daily-digest"""
+    if DRY:
+        print("[DRY LINE] " + text.replace("\n", " | "))
+        return
+    q = urllib.parse.urlencode({"action": "notify", "key": os.environ["LINE_NOTIFY_KEY"], "text": text})
+    try:
+        http(f'{os.environ["LINE_NOTIFY_URL"]}?{q}', timeout=60)
+    except Exception as e:
+        print("ส่ง LINE ไม่สำเร็จ:", type(e).__name__)
+
+
+def alert(state, key, text, cooldown_h, line=False):
     sent = state.setdefault("sent", {})
     if time.time() - sent.get(key, 0) < cooldown_h * 3600:
         return
     sent[key] = time.time()
     state.setdefault("alerts", []).insert(0, {"t": now.isoformat(timespec="minutes"), "kind": key.split(":")[0], "text": mask(text)})
     del state["alerts"][30:]
-    send_tg(f"⚠️ bangkho.ac.th\n{text}\nดูสถานะ: {PAGE_URL}")
+    msg = f"⚠️ bangkho.ac.th\n{text}\nดูสถานะ: {PAGE_URL}"
+    send_tg(msg)
+    if line:
+        send_line(msg)
 
 
 def main():
