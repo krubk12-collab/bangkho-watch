@@ -12,11 +12,12 @@ jobs:
   watch:
     runs-on: ubuntu-latest
     timeout-minutes: 12
-    env:   # govhit.mjs นับการดึงข้อมูลภาครัฐของทุกสคริปต์ node → ai-hub /hit (ดู /apihub)
-      NODE_OPTIONS: --import ./govhit.mjs
+    env:
       AI_HUB_TOKEN: ${{ secrets.AI_HUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      # govhit.mjs นับการดึงข้อมูลภาครัฐของทุกสคริปต์ node → ai-hub /hit (ดู /apihub) — ตั้งหลัง checkout เพราะก่อนหน้านั้นยังไม่มีไฟล์
+      - run: echo "NODE_OPTIONS=--import $PWD/govhit.mjs" >> "$GITHUB_ENV"
       - name: load previous state
         run: |
           mkdir -p site
@@ -75,7 +76,7 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
-          NODE_OPTIONS: --dns-result-order=ipv4first --import ./govhit.mjs
+          NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node water_alert.mjs
       - name: staff gauge Nonthaburi pier (AI)
         continue-on-error: true
@@ -123,7 +124,7 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
-          NODE_OPTIONS: --dns-result-order=ipv4first --import ./govhit.mjs
+          NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node wn.mjs
       - name: 4-week school flood risk (every 6h)
         continue-on-error: true
@@ -133,7 +134,7 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
-          NODE_OPTIONS: --dns-result-order=ipv4first --import ./govhit.mjs
+          NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node risk3w.mjs
       - name: forecast log → branch fclog (append-only)
         # เก็บพยากรณ์ Open-Meteo + WeatherNext + ฝนวัดจริง ไว้ตรวจย้อนหลังว่าแหล่งไหนแม่น
@@ -161,7 +162,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           OUT_DIR: site
-          NODE_OPTIONS: --dns-result-order=ipv4first --import ./govhit.mjs
+          NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node outlook.mjs
       - name: publish status page
         run: |
