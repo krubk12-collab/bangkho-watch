@@ -58,7 +58,8 @@ async function main() {
     alerts.push({id: s.id, ...a});
   }
   let sent = [];
-  if (alerts.length) sent = (await (await fetch(API + '/alert', {method: 'POST', headers: {...auth, 'Content-Type': 'application/json'}, body: JSON.stringify({alerts})})).json()).sent || [];
+  for (let i = 0; i < alerts.length; i += 40)   // Worker ฟรีเรียกออกได้ 50 ครั้งต่อรอบ → ส่งทีละ 40
+    sent.push(...((await (await fetch(API + '/alert', {method: 'POST', headers: {...auth, 'Content-Type': 'application/json'}, body: JSON.stringify({alerts: alerts.slice(i, i + 40)})})).json()).sent || []));
   console.log(`todry_push: ผู้รับ ${subs.length} · จุด ${Object.keys(cache).length} · เตือน ${alerts.length} · ส่งได้ ${sent.filter(x => x[1] >= 200 && x[1] < 300).length} · ภาพ ${Math.round((now - fL.time * 1000) / 60e3)} นาทีก่อน`);
 }
 
