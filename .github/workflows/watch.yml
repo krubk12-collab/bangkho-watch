@@ -16,8 +16,6 @@ jobs:
       AI_HUB_TOKEN: ${{ secrets.AI_HUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      # govhit.mjs นับการดึงข้อมูลภาครัฐของทุกสคริปต์ node → ai-hub /hit (ดู /apihub) — ตั้งหลัง checkout เพราะก่อนหน้านั้นยังไม่มีไฟล์
-      - run: echo "NODE_OPTIONS=--import $PWD/govhit.mjs" >> "$GITHUB_ENV"
       - name: load previous state
         run: |
           mkdir -p site
@@ -32,7 +30,7 @@ jobs:
         timeout-minutes: 3
         env:
           TODRY_PUSH_ADMIN: ${{ secrets.TODRY_PUSH_ADMIN }}
-        run: node todry_push.mjs
+        run: node --import ./govhit.mjs todry_push.mjs
       - name: check
         env:
           DA_USER: ${{ secrets.DA_USER }}
@@ -75,7 +73,7 @@ jobs:
         timeout-minutes: 1
         run: |
           K=https://bangkho.ac.th/keep/api.php
-          curl -sf --max-time 20 "$K?action=list" -o /tmp/kl.json && curl -sf --max-time 20 "$K?action=remoteState" -o /tmp/ks.json             && node radio.mjs /tmp/kl.json /tmp/ks.json site/w/radio.json
+          curl -sf --max-time 20 "$K?action=list" -o /tmp/kl.json && curl -sf --max-time 20 "$K?action=remoteState" -o /tmp/ks.json             && node --import ./govhit.mjs radio.mjs /tmp/kl.json /tmp/ks.json site/w/radio.json
       - name: water alert (Telegram)
         continue-on-error: true      # เตือนน้ำพลาดต้องไม่ทำให้หน้าสถานะเว็บหยุด
         env:
@@ -106,7 +104,7 @@ jobs:
           OUT_DIR: site
         run: |
           command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
-          node gauge.mjs
+          node --import ./govhit.mjs gauge.mjs
       - name: RID daily report (C.29B, every 2h)
         continue-on-error: true
         timeout-minutes: 3
@@ -115,13 +113,13 @@ jobs:
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
         run: |
           command -v pdftotext >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils >/dev/null)
-          node rid.mjs
+          node --import ./govhit.mjs rid.mjs
       - name: radar rain at school (ground truth for score)
         continue-on-error: true
         timeout-minutes: 3
         env:
           OUT_DIR: site
-        run: node rain.mjs
+        run: node --import ./govhit.mjs rain.mjs
       - name: satellite cloud growth near school (Himawari, test log)
         # 🧪 บันทึกเมฆก่อตัวจากดาวเทียมไว้เทียบกับ radar.json ก่อนเอาป้ายทดลองในหน้าเว็บออก
         continue-on-error: true
@@ -130,7 +128,7 @@ jobs:
           OUT_DIR: site
         run: |
           command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
-          node sat.mjs
+          node --import ./govhit.mjs sat.mjs
       - name: WeatherNext heavy-rain odds (every 3h)
         continue-on-error: true
         timeout-minutes: 3
@@ -165,7 +163,7 @@ jobs:
           git clone -q --depth=1 -b fclog "$U" fclog 2>/dev/null || { mkdir -p fclog && git -C fclog init -q -b fclog; }
           cat site/fclog-line.json >> "fclog/$(TZ=Asia/Bangkok date +%Y-%m).jsonl"
           rm -f site/fclog-line.json
-          node score.mjs fclog fclog/score.json && cp fclog/score.json site/score.json || true
+          node --import ./govhit.mjs score.mjs fclog fclog/score.json && cp fclog/score.json site/score.json || true
           cd fclog && git add -A
           git -c user.name=bangkho-watch -c user.email=actions@users.noreply.github.com commit -qm "fclog $(TZ=Asia/Bangkok date '+%F %H:%M')"
           git push -q "$U" fclog

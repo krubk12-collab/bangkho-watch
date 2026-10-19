@@ -262,20 +262,23 @@ def probe_all(state):
             state.pop("php_down_since")
             state.get("sent", {}).pop("php", None)
     # ไฟ 3 สี: 🟢 เว็บเข้าได้และท่อใช้งานได้ · 🟡 เว็บเข้าได้แต่ท่อมีปัญหา · 🔴 เว็บเข้าไม่ได้เลย
+    # เตือนเมื่อพัง 2 รอบติด (≥10 นาที) — เว็บสะดุดไม่ถึงนาที (19ต.ค. 10:51, 20ต.ค. 01:01) เคยส่ง 🔴 ทีเดียว 18 ข้อความ
+    # เข้าไม่ได้เกินครึ่ง = ทั้งเว็บล่ม → ให้ข้อความ "เว็บมีปัญหา" ข้อความเดียวใน main() แจ้งแทน
     was = state.setdefault("sys_ok", {})
     for s in systems:
         s["level"] = "ok" if s["ok"] else "warn" if s.get("site") else "down"
+    site_down = sum(s["level"] == "down" for s in systems) * 2 > len(systems)
+    for s in systems:
         prev = was.get(s["sys"])
-        if s["sys"] in php5:
-            continue                                     # รวมอยู่ในข้อความ PHP ล่มแล้ว
-        if s["level"] == "down":
-            alert(state, f'sys:{s["sys"]}', f'🔴 {s["name"]} — เข้าเว็บไม่ได้เลย ({s["detail"] or "ไม่ตอบ"})', 6)
-        elif s["level"] == "warn":
-            alert(state, f'sys:{s["sys"]}', f'🟡 {s["name"]} — เว็บเข้าได้ แต่ {s.get("pipe_name", "ท่อ")} มีปัญหา: {s["detail"] or "เช็คไม่ผ่าน"}', 6)
-        elif prev is False:
-            send_tg(f'🟢 {s["name"]} กลับมาปกติแล้ว\n{PAGE_URL}')
-            state.get("sent", {}).pop(f'sys:{s["sys"]}', None)
         was[s["sys"]] = s["ok"]
+        if s["sys"] in php5 or (site_down and s["level"] == "down"):
+            continue                                     # รวมอยู่ในข้อความ PHP ล่ม / เว็บล่มแล้ว
+        if s["level"] == "down" and prev is False:
+            alert(state, f'sys:{s["sys"]}', f'🔴 {s["name"]} — เข้าเว็บไม่ได้เลย ({s["detail"] or "ไม่ตอบ"})', 6)
+        elif s["level"] == "warn" and prev is False:
+            alert(state, f'sys:{s["sys"]}', f'🟡 {s["name"]} — เว็บเข้าได้ แต่ {s.get("pipe_name", "ท่อ")} มีปัญหา: {s["detail"] or "เช็คไม่ผ่าน"}', 6)
+        elif s["ok"] and state.get("sent", {}).pop(f'sys:{s["sys"]}', None):
+            send_tg(f'🟢 {s["name"]} กลับมาปกติแล้ว\n{PAGE_URL}')
     return systems
 
 
@@ -368,12 +371,16 @@ def main():
     suspended = any(c["note"] == "ถูกระงับบัญชี" for c in checks)
     if bad and state.get("php_down_since") and all(c["code"] >= 500 for c in bad):
         pass                                             # หน้าที่ 503 มาจาก PHP ล่ม — แจ้งในข้อความ PHP แล้ว
+    elif bad and not state.get("site_bad"):
+        state["site_bad"] = True                         # รอบแรกยังไม่เตือน — รอดูรอบหน้า (สะดุดสั้น ๆ ไม่ต้องปลุก)
     elif bad:
         what = "โฮสต์ระงับบัญชี (แบนด์วิดท์/ทรัพยากรเกิน)" if suspended else \
             "เปิดไม่ได้: " + ", ".join(f'{c["path"]} ({c["code"] or c["note"]})' for c in bad)
         alert(state, "down", f"🔴 เว็บมีปัญหา — {what}", 1)
         state["down_since"] = state.get("down_since") or now.isoformat(timespec="minutes")
-    elif state.get("down_since"):
+    if not bad:
+        state.pop("site_bad", None)
+    if not bad and state.get("down_since"):
         send_tg(f"✅ bangkho.ac.th กลับมาใช้ได้แล้ว (ล่มตั้งแต่ {state['down_since'][11:16]} น.)\n{PAGE_URL}")
         state.pop("down_since")
         state.get("sent", {}).pop("down", None)
