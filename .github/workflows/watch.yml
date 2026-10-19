@@ -27,6 +27,12 @@ jobs:
             for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json satci.json score.json risk3w.json goto_ai.json wapi.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
             git archive FETCH_HEAD w 2>/dev/null | tar -x -C site 2>/dev/null || true   # สำเนา PHP อื่นรอบก่อน (ต้นทางพังรอบนี้ยังมีของเดิม)
           fi
+      - name: todry push (เตือนฝนแม้ปิดแอป /todry/ — รันก่อนขั้นอื่นให้เตือนเร็ว)
+        continue-on-error: true
+        timeout-minutes: 3
+        env:
+          TODRY_PUSH_ADMIN: ${{ secrets.TODRY_PUSH_ADMIN }}
+        run: node todry_push.mjs
       - name: check
         env:
           DA_USER: ${{ secrets.DA_USER }}
