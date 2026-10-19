@@ -19,7 +19,7 @@ BKK = timezone(timedelta(hours=7))
 SITE = "https://bangkho.ac.th"
 DA = "https://ns105.hostinglotus.net:2222"          # ใช้ IP:2222 จะโดน 301 มาชื่อนี้
 PAGE_URL = "https://krubk12-collab.github.io/bangkho-watch/"
-CHECK_PATHS = ["/", "/home/", "/behave/", "/keep/", "/photo/", "/check/", "/sos/", "/todry/tmd.php?log=1"]  # tmd.php: ถือโอกาสเก็บบันทึกความแม่นพยากรณ์ทุกรอบ
+CHECK_PATHS = ["/", "/home/", "/behave/", "/keep/", "/photo/", "/check/", "/sos/", "/todry/tmd.php?log=1", "/todry/log.php?obs=1"]  # tmd.php/log.php: ถือโอกาสเก็บบันทึกความแม่นพยากรณ์ + ฝนจริงจากเรดาร์ทุกรอบ
 MB = 1_000_000
 
 # ตรวจ "ท่อ" ของแต่ละระบบ (ชิ้นที่ 2, 18 ก.ย.69) — ยิงประตู health.php ที่วางไว้ในแต่ละระบบ
