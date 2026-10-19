@@ -24,7 +24,7 @@ jobs:
           if git fetch --depth=1 origin status 2>/dev/null; then
             git show FETCH_HEAD:state.json > site/state.json 2>/dev/null || rm -f site/state.json
             git show FETCH_HEAD:water.json > site/water.json 2>/dev/null || rm -f site/water.json
-            for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json satci.json score.json risk3w.json goto_ai.json wapi.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
+            for f in gauge.json gauge-pakkret.json gauge-pathum.json outlook.json rid.json wn.json radar.json satci.json score.json risk3w.json goto_ai.json wapi.json quake.json; do git show FETCH_HEAD:$f > site/$f 2>/dev/null || rm -f site/$f; done
             git archive FETCH_HEAD w 2>/dev/null | tar -x -C site 2>/dev/null || true   # สำเนา PHP อื่นรอบก่อน (ต้นทางพังรอบนี้ยังมีของเดิม)
           fi
       - name: todry push (เตือนฝนแม้ปิดแอป /todry/ — รันก่อนขั้นอื่นให้เตือนเร็ว)
@@ -84,6 +84,15 @@ jobs:
           OUT_DIR: site
           NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node water_alert.mjs
+      - name: earthquake (กรมอุตุฯ+USGS → quake.json ให้ /quake/ + Telegram)
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT: ${{ secrets.TG_CHAT }}
+          OUT_DIR: site
+          NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
+        run: node quake.mjs
       - name: staff gauge Nonthaburi pier (AI)
         continue-on-error: true
         timeout-minutes: 4
