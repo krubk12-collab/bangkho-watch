@@ -39,6 +39,7 @@ jobs:
           TG_CHAT: ${{ secrets.TG_CHAT }}
           LINE_NOTIFY_URL: ${{ secrets.LINE_NOTIFY_URL }}   # เฉพาะ PHP ล่ม/กลับมา
           LINE_NOTIFY_KEY: ${{ secrets.LINE_NOTIFY_KEY }}
+          IDEA_KEY: ${{ secrets.IDEA_KEY }}   # เตือนเข้าแอป /idea/ คู่ Telegram
           OUT_DIR: site
         run: python watch.py
       - name: water api mirror (/water/api.php → wapi.json, ใช้แทนตอน PHP โฮสต์ล่ม)

@@ -6,7 +6,7 @@
 env: DA_USER DA_PASS TG_TOKEN TG_CHAT · OUT_DIR (ค่าเริ่มต้น site) · DRY_RUN=1 = พิมพ์แทนส่ง Telegram
 repo นี้เป็นสาธารณะ: ห้าม print IP/ข้อความเตือนลง log ของ Actions · IP ใน status.json/state.json ต้องปิดบังเสมอ
 """
-import base64, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+import base64, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request, zlib
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -322,6 +322,22 @@ def send_tg(text):
         http(f'https://api.telegram.org/bot{os.environ["TG_TOKEN"]}/sendMessage?{q}', timeout=60)
     except Exception as e:
         print("ส่ง Telegram ไม่สำเร็จ:", type(e).__name__)   # ห้าม print e — URL มี token
+    send_idea(text)
+
+
+def send_idea(text):
+    """เด้งเข้าแอป 💡 คลังไอเดีย (bangkho.ac.th/idea/) คู่กับ Telegram — ผ่าน Worker todry-push /idea/send"""
+    if not os.environ.get("IDEA_KEY"):
+        return
+    head, _, rest = text.partition("\n")
+    body = json.dumps({"title": head[:120], "body": rest[:900] or "", "tag": "watch-%x" % (zlib.crc32(head.encode()) % 65536),
+                       "url": "https://krubk12-collab.github.io/bangkho-watch/", "src": "bangkho-watch"}).encode()
+    req = urllib.request.Request("https://todry-push.krubk12.workers.dev/idea/send", data=body, method="POST",
+                                 headers={"Authorization": "Idea " + os.environ["IDEA_KEY"], "Content-Type": "application/json", "User-Agent": "bangkho-watch/1"})
+    try:
+        urllib.request.urlopen(req, timeout=30).read()
+    except Exception as e:
+        print("ส่งเข้าแอปไอเดียไม่สำเร็จ:", type(e).__name__)
 
 
 def send_line(text):
