@@ -76,7 +76,7 @@ async function send(text) {
 
 const getText = async (u, tries = 3) => {
   for (let i = 1; ; i++) {
-    try { const r = await fetch(u, {signal: AbortSignal.timeout(30e3)}); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.text(); }
+    try { const r = await fetch(u, {signal: AbortSignal.timeout(50e3)}); if (!r.ok) throw new Error('HTTP ' + r.status); return await r.text(); }
     catch (e) { if (i >= tries) throw e; await new Promise(r => setTimeout(r, 5e3)); }
   }
 };
@@ -109,11 +109,30 @@ async function main() {
   const prev = (() => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return {}; } })();
   const now = Date.now(), errs = [];
   let tmd = [], usgs = [];
-  try { tmd = parseTmd(await getText(TMD)); } catch (e) { errs.push('tmd ' + (e.cause?.code || e.message)); }
-  try {
-    const q = `&starttime=${new Date(now - 864e5).toISOString().slice(0, 19)}&latitude=${SCHOOL[0]}&longitude=${SCHOOL[1]}&maxradiuskm=${NEAR_KM}&minmagnitude=${NEAR_M}`;
-    usgs = JSON.parse(await getText(USGS + q)).features.map(fromUsgs);
-  } catch (e) { errs.push('usgs ' + (e.cause?.code || e.message)); }
+  // ข้อมูลให้หน้า /quake/ โหลดทีเดียว: API ค้นหาของ USGS/EMSC ตอบช้า 10–30 วิ ถ้าให้เบราว์เซอร์เรียกเองหน้าเว็บจะค้าง
+  // ดึงที่นี่ทุก 10 นาทีแทน · แหล่งไหนพังรอบนี้ใช้ของรอบก่อน
+  const yr = new Date(now).getUTCFullYear(), since = new Date(now - KEEP_D * 864e5).toISOString().slice(0, 10);
+  const pageOld = prev.page || {};
+  const [rTmd, rNear, rEmsc, rCnt, rYear] = await Promise.allSettled([
+    getText(TMD),
+    getText(`${USGS}&starttime=${since}&latitude=${SCHOOL[0]}&longitude=${SCHOOL[1]}&maxradiuskm=2000&minmagnitude=2.5`),
+    getText(`https://www.seismicportal.eu/fdsnws/event/1/query?format=json&lat=${SCHOOL[0]}&lon=${SCHOOL[1]}&maxradius=18&starttime=${since}&minmag=2.5&limit=1000`),
+    getText(`https://earthquake.usgs.gov/fdsnws/event/1/count?starttime=${yr}-01-01&minmagnitude=6`),
+    getText(`${USGS}&starttime=${yr}-01-01&minmagnitude=6`)]);
+  const why = r => r.reason?.cause?.code || r.reason?.message;
+  if (rTmd.status === 'fulfilled') tmd = parseTmd(rTmd.value); else errs.push('tmd ' + why(rTmd));
+  const slimU = f => ({id: f.id, geometry: {coordinates: f.geometry.coordinates}, properties: Object.fromEntries(
+    ['place', 'mag', 'time', 'url', 'tsunami', 'alert', 'felt', 'types', 'detail'].map(k => [k, f.properties[k]]))});
+  const slimE = f => ({id: f.id, properties: Object.fromEntries(['flynn_region', 'mag', 'time', 'lon', 'lat', 'depth', 'unid'].map(k => [k, f.properties[k]]))});
+  const page = {...pageOld};
+  if (rNear.status === 'fulfilled') {
+    page.near = JSON.parse(rNear.value).features.map(slimU); page.nearT = now;
+    // เตือน: วันล่าสุด ≥4.5 ใน 1,500 กม. (กรองจากชุดเดียวกัน ไม่ต้องยิง API ซ้ำ)
+    usgs = page.near.map(fromUsgs).filter(e => now - e.time < 864e5 && e.mag >= NEAR_M && km(SCHOOL[0], SCHOOL[1], e.lat, e.lon) <= NEAR_KM);
+  } else errs.push('usgs ' + why(rNear));
+  if (rEmsc.status === 'fulfilled') { page.emsc = JSON.parse(rEmsc.value).features.map(slimE); page.emscT = now; } else errs.push('emsc ' + why(rEmsc));
+  if (rCnt.status === 'fulfilled' && /^\d+$/.test(rCnt.value.trim())) page.yearCount = {yr, n: +rCnt.value.trim()};
+  if (rYear.status === 'fulfilled') { page.year = JSON.parse(rYear.value).features.map(slimU); page.yearT = now; } else errs.push('year ' + why(rYear));
   // เก็บ TMD สะสม 30 วัน (RSS มีแค่ 10 รายการล่าสุด)
   const keep = new Map((prev.tmd || []).filter(e => now - e.time < KEEP_D * 864e5).map(e => [e.id, e]));
   for (const e of tmd) keep.set(e.id, e);
@@ -126,7 +145,7 @@ async function main() {
   }
   if (!prev.t) sent.push(...[...tmd, ...usgs].map(e => ({id: e.id, time: e.time, lat: e.lat, lon: e.lon})));
   const list = [...keep.values()].sort((a, b) => b.time - a.time);
-  fs.writeFileSync(FILE, JSON.stringify({t: new Date(now).toISOString(), ok: tmd.length > 0, tmd: list, sent, errs}));
-  console.log(`quake: tmd ${tmd.length} (สะสม ${list.length}) usgs ${usgs.length} ส่ง ${fresh.length}${errs.length ? ' · ' + errs.join(', ') : ''}`);
+  fs.writeFileSync(FILE, JSON.stringify({t: new Date(now).toISOString(), ok: tmd.length > 0, tmd: list, sent, errs, page}));
+  console.log(`quake: tmd ${tmd.length} (สะสม ${list.length}) usgs ${usgs.length} ส่ง ${fresh.length} · หน้าเว็บ near ${page.near?.length} emsc ${page.emsc?.length} year ${page.year?.length}${errs.length ? ' · ' + errs.join(', ') : ''}`);
 }
 await main();

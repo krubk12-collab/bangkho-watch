@@ -84,7 +84,7 @@ jobs:
         run: node water_alert.mjs
       - name: earthquake (กรมอุตุฯ+USGS → quake.json ให้ /quake/ + Telegram)
         continue-on-error: true
-        timeout-minutes: 2
+        timeout-minutes: 5
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
