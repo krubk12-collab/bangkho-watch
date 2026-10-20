@@ -365,6 +365,28 @@ def alert(state, key, text, cooldown_h, line=False):
         send_line(msg)
 
 
+def check_apihub(state):
+    """ชั่วโมงละครั้ง: ถาม /apihub/ ว่าคีย์/ยอดเงิน/บริการภายนอกผิดปกติไหม → เด้งเข้าแอป /idea/ (เรื่องเดิมวันละครั้ง)
+    อยู่ที่นี่เพราะ Worker เรียกเข้า bangkho.ac.th ไม่ได้ (Cloudflare ตอบหน้ากันบอท)"""
+    if not os.environ.get("IDEA_KEY") or time.time() - state.get("api_last", 0) < 3500:
+        return
+    state["api_last"] = time.time()
+    req = urllib.request.Request(f"{SITE}/apihub/api.php?action=watch", headers={"X-Idea-Key": os.environ["IDEA_KEY"], "User-Agent": "bangkho-watch/1.0"})
+    try:
+        issues = json.loads(urllib.request.urlopen(req, timeout=60).read()).get("issues", [])
+    except Exception as e:
+        print("เช็ก API Hub ไม่สำเร็จ:", type(e).__name__)
+        return
+    sent = state.setdefault("api_sent", {})
+    today = now.strftime("%Y-%m-%d")
+    for i in issues:
+        if sent.get(i["k"]) != today:
+            sent[i["k"]] = today
+            send_idea("🔑 API Hub\n" + i["text"])
+    for k in [k for k, d in sent.items() if d != today and k not in {i["k"] for i in issues}]:
+        del sent[k]   # หายแล้ว — ถ้ากลับมาเป็นอีกจะเตือนใหม่
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     state_path = os.path.join(OUT, "state.json")
@@ -379,6 +401,7 @@ def main():
         status["systems"] = probe_all(state)
     except Exception as e:
         status["errors"].append(f"ตรวจระบบย่อยไม่สำเร็จ: {type(e).__name__}")
+    check_apihub(state)
 
     # 1) หน้าเว็บจริงยังเปิดได้ไหม
     checks = check_site()
