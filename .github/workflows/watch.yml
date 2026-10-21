@@ -89,6 +89,7 @@ jobs:
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
+          IDEA_KEY: ${{ secrets.IDEA_KEY }}
           OUT_DIR: site
           NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node quake.mjs

@@ -71,7 +71,20 @@ async function send(text) {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({chat_id: process.env.TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true})});
   const j = await r.json();
+  await sendIdea(text);
   if (!j.ok) throw new Error('telegram ' + (j.error_code || r.status));
+}
+
+// เด้งเข้าแอป 💡 คลังไอเดีย คู่ Telegram (เหมือน send_idea ใน watch.py) — ตัดแท็ก HTML ออก
+async function sendIdea(text) {
+  if (!process.env.IDEA_KEY) return;
+  const plain = text.replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  const [head, ...rest] = plain.split('\n');
+  try {
+    await fetch('https://todry-push.krubk12.workers.dev/idea/send', {method: 'POST', signal: AbortSignal.timeout(30e3),
+      headers: {'Authorization': 'Idea ' + process.env.IDEA_KEY, 'Content-Type': 'application/json', 'User-Agent': 'bangkho-watch/1'},
+      body: JSON.stringify({title: head.slice(0, 120), body: rest.join('\n').trim().slice(0, 900), tag: 'quake', url: SITE, src: 'แผ่นดินไหว'})});
+  } catch (e) { console.log('ส่งเข้าแอปไอเดียไม่สำเร็จ: ' + e.name); }
 }
 
 const getText = async (u, tries = 3) => {
