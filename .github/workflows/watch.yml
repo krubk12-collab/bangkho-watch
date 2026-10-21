@@ -141,7 +141,7 @@ jobs:
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '' }}
           NODE_OPTIONS: --dns-result-order=ipv4first --import ${{ github.workspace }}/govhit.mjs
         run: node wn.mjs
-      - name: 4-week school flood risk (every 6h)
+      - name: school flood risk until term opens (every 6h, stops itself after 2026-11-01)
         continue-on-error: true
         timeout-minutes: 4
         env:

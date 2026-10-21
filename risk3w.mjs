@@ -15,6 +15,9 @@ const C29B = [14.025, 100.525];            // สามโคก ปทุมฯ
 // ปรับหลังเก็บผลจริงช่วงปิดเทอม
 const Q_WATCH = 2500, Q_54 = 3500, RAIN_WK = 100;
 const DAILY_UNTIL = '2026-10-27';          // ส่งสรุปทุกเช้าถึงวันเปิดเทอม หลังจากนั้นส่งเมื่อระดับสูงขึ้นเท่านั้น
+// 21ต.ค.69 ลูกพี่: เลิก 4 การ์ดรายสัปดาห์ → นับถอยหลังถึงเปิดเทอม ประเมินช่วง "วันนี้ → จบสัปดาห์เปิดเทอม" + รายวัน · พ้น END ระบบหยุดเอง (แล้วค่อยลบ step ใน watch.yml)
+const OPEN = '2026-10-28', END = '2026-11-01';   // วันเปิดเทอม (พ.) · วันสุดท้ายของสัปดาห์เปิดเทอม (อา.)
+const RAIN_DAY = 35;                       // ฝนหนักรายวัน (มม.) สำหรับแถบรายวัน
 export const NAMES = ['ต่ำ', 'เฝ้าระวัง', 'น้ำอาจเข้าโดม/ลาน', 'เสี่ยงแบบปี 54'], ICON = ['🟢', '🟡', '🟠', '🔴'];
 
 const pct = (n, t) => t ? Math.round(n / t * 100) : null;
@@ -42,30 +45,46 @@ function river(glofas, scale, days) {
   if (!glofas || !scale) return null;
   const idx = days.map(d => glofas.daily.time.indexOf(d)).filter(i => i >= 0);
   const mx = members(glofas.daily, 'river_discharge').map(m => Math.max(...idx.map(i => m[i] ?? 0)) * scale).filter(v => v > 0);
-  if (idx.length < 4 || !mx.length) return null;
+  if (!idx.length || !mx.length) return null;
   return {n: mx.length, pWatch: pct(mx.filter(v => v >= Q_WATCH).length, mx.length),
     p54: pct(mx.filter(v => v >= Q_54).length, mx.length), med: Math.round(q(mx, .5)), p90: Math.round(q(mx, .9))};
 }
 
 // north = C.13 ชัยนาท · lower = C.29B สามโคก (รวมน้ำป่าสัก) · p54 ใช้แค่ C.13 (ยอดปี 54 ที่ C.29B ยังไม่ได้ยืนยัน)
-export function weeks(start, {glofas, scale, glofasL, scaleL, ec, gfs}) {
-  const W = [];
-  for (let k = 0; k < 4; k++) {
-    const days = [...Array(7)].map((_, i) => addDay(start, k * 7 + i));
-    const w = {from: days[0], to: days[6], spring: days.filter(spring), north: river(glofas, scale, days), lower: river(glofasL, scaleL, days), rain: null};
+export function weeks(start, src) {
+  return [0, 1, 2, 3].map(k => span([...Array(7)].map((_, i) => addDay(start, k * 7 + i)), src));
+}
+
+// ประเมินช่วงวันใดก็ได้ (เกณฑ์ฝนปรับตามจำนวนวัน: 100 มม./7 วัน)
+export function span(days, {glofas, scale, glofasL, scaleL, ec, gfs}) {
+  const rainTh = Math.round(RAIN_WK * days.length / 7);
+  {
+    const w = {from: days[0], to: days.at(-1), spring: days.filter(spring), north: river(glofas, scale, days), lower: river(glofasL, scaleL, days), rain: null};
     for (const [src, j] of [['ECMWF', ec], ['GFS', gfs]]) {
       if (!j) continue;
       const idx = days.map(d => j.daily.time.indexOf(d));
       const M = members(j.daily, 'precipitation_sum').filter(m => idx.every(i => i >= 0 && m[i] != null));
       if (idx.some(i => i < 0) || !M.length) continue;
       const tot = M.map(m => idx.reduce((s, i) => s + m[i], 0));
-      w.rain = {src, n: tot.length, p: pct(tot.filter(v => v >= RAIN_WK).length, tot.length), med: Math.round(q(tot, .5)), p90: Math.round(q(tot, .9))};
+      w.rain = {src, n: tot.length, th: rainTh, p: pct(tot.filter(v => v >= rainTh).length, tot.length), med: Math.round(q(tot, .5)), p90: Math.round(q(tot, .9))};
       break;
     }
     w.lvl = level(w);
-    W.push(w);
+    return w;
   }
-  return W;
+}
+
+// แถบรายวัน: น้ำทะเลหนุน + โอกาสฝนหนัก ≥35 มม./วัน (ECMWF ก่อน ไม่มีค่อย GFS)
+export function perDay(days, {ec, gfs}) {
+  return days.map(d => {
+    const o = {d, spring: spring(d), open: d === OPEN, rainP: null};
+    for (const j of [ec, gfs]) {
+      const i = j ? j.daily.time.indexOf(d) : -1;
+      const v = i < 0 ? [] : members(j.daily, 'precipitation_sum').map(m => m[i]).filter(x => x != null);
+      if (v.length) { o.rainP = pct(v.filter(x => x >= RAIN_DAY).length, v.length); o.rainMed = Math.round(q(v, .5)); break; }
+    }
+    return o;
+  });
 }
 
 // ประกาศปฏิบัติการน้ำ (กรมชลฯ ฯลฯ) จาก SLIC FloodDash — CC-BY-4.0 ต้องให้เครดิต · เจ้าของเว็บส่งต่อจากข่าว ไม่ใช่ API ทางการ
@@ -95,29 +114,35 @@ async function build() {
   const fit = (g, r) => { if (!g || !r) return null; const i = g.daily.time.indexOf(today), m = q(members(g.daily, 'river_discharge').map(x => x[i]), .5); return m > 0 ? r.q / m : null; };
   const scale = fit(glofas, rid), scaleL = fit(glofasL, low);
   if (!scale && !scaleL && !ec && !gfs) throw new Error('ไม่มีข้อมูลเลย');
-  const W = weeks(today, {glofas, scale, glofasL, scaleL, ec, gfs}), bul = bulletins(fd);
-  // แผนระบายเขื่อนที่แบบจำลองไม่รู้: ประกาศกรมชลฯ ที่ยังไม่หมดอายุและเตือนนนทบุรี → สัปดาห์ 1 อย่างน้อยเฝ้าระวัง
-  if (bul.some(b => b.nont)) { W[0].lvl = Math.max(W[0].lvl, 1); W[0].bulletin = true; }
-  return {t: new Date().toISOString(), today, c13: rid, c29b: low, scale: scale && +scale.toFixed(3), scaleL: scaleL && +scaleL.toFixed(3),
-    th: {watch: Q_WATCH, y54: Q_54, rain: RAIN_WK}, weeks: W, bulletins: bul};
+  const days = [], src = {glofas, scale, glofasL, scaleL, ec, gfs};
+  for (let d = today; d <= END; d = addDay(d, 1)) days.push(d);
+  const W = span(days, src), bul = bulletins(fd);
+  // แผนระบายเขื่อนที่แบบจำลองไม่รู้: ประกาศกรมชลฯ ที่ยังไม่หมดอายุและเตือนนนทบุรี → อย่างน้อยเฝ้าระวัง
+  if (bul.some(b => b.nont)) { W.lvl = Math.max(W.lvl, 1); W.bulletin = true; }
+  return {t: new Date().toISOString(), today, open: OPEN, end: END, left: Math.round((Date.parse(OPEN) - Date.parse(today)) / 864e5),
+    c13: rid, c29b: low, scale: scale && +scale.toFixed(3), scaleL: scaleL && +scaleL.toFixed(3),
+    th: {watch: Q_WATCH, y54: Q_54, rain: W.rain ? W.rain.th : null, day: RAIN_DAY}, span: W, days: perDay(days, src), bulletins: bul};
 }
 
 const thD = s => { const d = new Date(s + 'T12:00:00+07:00'); return `${d.getDate()} ${['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][d.getMonth()]}`; };
 export function message(R) {
-  const L = ['<b>🏫 ความเสี่ยงน้ำท่วมโรงเรียนชุมชนวัดบางโค 4 สัปดาห์ข้างหน้า</b>'];
+  const L = [`<b>🏫 ความเสี่ยงน้ำท่วมโรงเรียนชุมชนวัดบางโค ก่อนเปิดเทอม</b>`,
+    R.left > 0 ? `⏳ อีก <b>${R.left} วัน</b> เปิดเทอม (${thD(R.open)})` : R.left === 0 ? '🏫 <b>วันนี้เปิดเทอม</b>' : `🏫 เปิดเทอมแล้ว (ดูถึง ${thD(R.end)})`];
   const tr = x => x.prev == null ? '' : x.q > x.prev ? ` ↑ จาก ${x.prev.toLocaleString()}` : x.q < x.prev ? ` ↓ จาก ${x.prev.toLocaleString()}` : ' คงที่';
   if (R.c13) L.push(`ชัยนาท (C.13) ${R.c13.q.toLocaleString()} ลบ.ม./วิ${tr(R.c13)}`);
   if (R.c29b) L.push(`สามโคก ปทุมฯ (C.29B รวมน้ำป่าสัก) ${R.c29b.q.toLocaleString()} ลบ.ม./วิ${tr(R.c29b)}`);
-  for (const w of R.weeks) {
+  for (const w of R.weeks || [R.span]) {
     const n = w.north, r = w.rain, b = [];
     if (n) b.push(`C.13 ~${n.med.toLocaleString()} (เกิน ${R.th.watch.toLocaleString()}: ${n.pWatch}%)`);
     if (w.lower) b.push(`C.29B ~${w.lower.med.toLocaleString()} (เกิน ${R.th.watch.toLocaleString()}: ${w.lower.pWatch}%)`);
-    if (r) b.push(`ฝน ≥${R.th.rain} มม./สัปดาห์ ${r.p}%`);
+    if (r) b.push(`ฝนรวม ≥${r.th ?? R.th.rain} มม. ${r.p}%`);
     if (w.spring.length) b.push(`น้ำทะเลหนุน ${thD(w.spring[0])}–${thD(w.spring[w.spring.length - 1])}`);
     L.push('', `${ICON[w.lvl]} <b>${thD(w.from)}–${thD(w.to)}: ${NAMES[w.lvl]}</b>`, b.join(' · '));
   }
+  const wet = (R.days || []).filter(d => d.rainP >= 30);
+  if (wet.length) L.push(`☔ วันที่ฝนหนัก ≥${R.th.day} มม. มีโอกาส ≥30%: ` + wet.map(d => `${thD(d.d)} ${d.rainP}%`).join(' · '));
   if (R.bulletins && R.bulletins.length) L.push('', '<b>📢 ประกาศกรมชลฯ ที่ยังมีผล</b>', ...R.bulletins.map(b => '• ' + b.title), '<i>ผ่าน SLIC FloodDash (flood.nonarkara.org, CC-BY-4.0)</i>');
-  return L.join('\n') + `\n\n🔗 ${SITE}#risk3w\n<i>ประเมินจากแบบจำลอง (GloFAS/ECMWF/GFS) ความแม่นลดลงตามระยะ สัปดาห์ 3–4 เป็นแนวโน้ม · ไม่ใช่ประกาศทางการ ติดตามกรมชลประทาน/ปภ.</i>`;
+  return L.join('\n') + `\n\n🔗 ${SITE}#risk3w\n<i>ประเมินจากแบบจำลอง (GloFAS/ECMWF/GFS) · ไม่ใช่ประกาศทางการ ติดตามกรมชลประทาน/ปภ.</i>`;
 }
 
 async function send(text) {
@@ -147,6 +172,11 @@ function test() {
   const WL = weeks('2026-10-01', {glofas, scale: 0.2, glofasL: glofas, scaleL: 0.6, ec: null, gfs: null});
   assert(WL[0].north.pWatch === 0 && WL[0].lower.pWatch === 100 && WL[0].lvl === 1, 'lower ' + JSON.stringify(WL[0]));
   assert(message({c13: {q: 2200}, th: {watch: 2500, rain: 100}, weeks: W}).includes('🟠'), 'msg');
+  // ช่วงสั้นกว่า 7 วัน: เกณฑ์ฝนลดตามสัดส่วน (3 วัน → 43 มม.) · รายวันฝนหนัก ≥35
+  const S3 = span(time.slice(0, 3), {glofas, scale: 0.5, ec, gfs: null});
+  assert(S3.rain.th === 43 && S3.rain.p === 78 && S3.north.n === 51, 'span3 ' + JSON.stringify(S3.rain));
+  const D = perDay(['2026-10-01', '2026-10-28'], {ec, gfs: null});
+  assert(D[0].rainP === 0 && D[0].rainMed === 20 && D[1].rainP === null && D[1].open, 'perDay ' + JSON.stringify(D));
   const fd = {bulletins: [{title_th: 'กรมชลฯ เพิ่มระบาย', area_th: 'ลุ่มเจ้าพระยาตอนล่าง', expires_at: '2026-10-01T00:00:00+07:00', items: [{th: 'แจ้งเตือน ปทุมธานี นนทบุรี'}]},
     {title_th: 'เก่า', area_th: 'เจ้าพระยา', expires_at: '2026-09-01T00:00:00+07:00'}, {title_th: 'ภาคใต้', area_th: 'พัทลุง'}]};
   const B = bulletins(fd, Date.parse('2026-09-30T12:00:00+07:00'));
@@ -157,16 +187,21 @@ function test() {
 async function main() {
   if (process.argv[2] === 'test') return test();
   const prev = (() => { try { return JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { return {}; } })();
-  if (!process.env.FORCE && prev.t && Date.now() - Date.parse(prev.t) < EVERY_H * 36e5 - 5 * 60e3) { console.log('risk3w: ยังไม่ครบรอบ'); return; }
+  const today = new Date(Date.now() + 7 * 36e5).toISOString().slice(0, 10);
+  if (today > END) {   // พ้นสัปดาห์เปิดเทอม = จบภารกิจ หน้าเว็บซ่อนส่วนนี้เอง
+    if (!prev.ended) fs.writeFileSync(FILE, JSON.stringify({t: new Date().toISOString(), ended: true, open: OPEN, end: END}));
+    console.log('risk3w: สิ้นสุดแล้ว (เลย ' + END + ') ลบ step นี้ใน watch.yml ได้'); return;
+  }
+  if (!process.env.FORCE && prev.t && !prev.weeks && Date.now() - Date.parse(prev.t) < EVERY_H * 36e5 - 5 * 60e3) { console.log('risk3w: ยังไม่ครบรอบ'); return; }
   let R;
   try { R = await build(); } catch (e) { console.log('risk3w: ข้ามรอบนี้ —', e.message); return; }
-  const h = new Date(Date.now() + 7 * 36e5).getUTCHours(), top = Math.max(...R.weeks.map(w => w.lvl));
+  const h = new Date(Date.now() + 7 * 36e5).getUTCHours(), top = R.span.lvl;
   const daily = R.today <= DAILY_UNTIL && h >= 6 && h < 12 && prev.sentDay !== R.today;
   R.sentDay = prev.sentDay; R.sentLvl = Math.min(prev.sentLvl ?? 0, top);
   if (daily || top > (prev.sentLvl ?? 0) || process.env.FORCE_TG) {
     try { await send(message(R)); R.sentDay = R.today; R.sentLvl = top; } catch (e) { console.log('risk3w: ส่ง Telegram ไม่ได้ —', e.message); }
   }
   fs.writeFileSync(FILE, JSON.stringify(R));
-  console.log('risk3w:', R.weeks.map(w => `${w.from} ${NAMES[w.lvl]}`).join(' · '));
+  console.log('risk3w:', `${R.span.from}–${R.span.to} ${NAMES[R.span.lvl]} · อีก ${R.left} วันเปิดเทอม`);
 }
 await main();
