@@ -48,10 +48,11 @@ async function main() {
     cache[k0] ??= Promise.all([tile(fM, s.lat, s.lon).catch(() => null), tile(fL, s.lat, s.lon)]).then(([M, L]) => check(M, L, mn, s.lat)).catch(() => 'err');
     const r = await cache[k0]; if (!r || r === 'err') continue;
     const name = s.name || 'จุดเตือนของคุณ';
-    let a = null;
-    if (r.wet) a = {k: 'wet', body: `ฝนเริ่มตกที่${name}แล้ว เก็บผ้าด่วน!`};
-    else { const at = fL.time * 1000 + r.eta * 60e3, left = Math.round((at - now) / 60e3);
-      if (left >= 0 && left <= s.lead) a = {k: 'eta', body: `${name}: ฝนอาจมาถึงราว ${new Date(at + 7 * HOUR).toISOString().slice(11, 16)} น. (อีก ~${left} นาที) เก็บผ้าก่อนนะ`}; }
+    let a = null; const car = s.app === 'carwash';   // /carwash/ ล้างรถ ใช้ระบบเดียวกัน ต่างแค่ข้อความ
+    if (r.wet) a = {k: 'wet', body: car ? `ฝนเริ่มตกที่${name}แล้ว ถ้ารถเพิ่งล้าง จอดในร่มหรือรอฝนหยุดค่อยออกเดินทาง` : `ฝนเริ่มตกที่${name}แล้ว เก็บผ้าด่วน!`};
+    else { const at = fL.time * 1000 + r.eta * 60e3, left = Math.round((at - now) / 60e3), hm = new Date(at + 7 * HOUR).toISOString().slice(11, 16);
+      if (left >= 0 && left <= s.lead) a = {k: 'eta', body: car ? `${name}: ฝนอาจมาถึงราว ${hm} น. (อีก ~${left} นาที) อย่าเพิ่งล้างรถ ถ้าล้างแล้วหาที่จอดในร่มก่อนนะ` : `${name}: ฝนอาจมาถึงราว ${hm} น. (อีก ~${left} นาที) เก็บผ้าก่อนนะ`}; }
+    if (a && car) a.title = '🚗 ล้างรถวันไหนดี';
     if (!a) continue;
     if (s.quiet && (hr >= 21 || hr < 6)) continue;
     if (s.lastk === a.k && now - (s.last || 0) < HOUR) continue;   // เตือนเรื่องเดิมไม่เกินชั่วโมงละครั้ง · มา→ตก เตือนซ้ำได้
