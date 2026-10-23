@@ -128,7 +128,8 @@ async function main() {
   const pageOld = prev.page || {};
   const [rTmd, rNear, rEmsc, rCnt, rYear] = await Promise.allSettled([
     getText(TMD),
-    getText(`${USGS}&starttime=${since}&latitude=${SCHOOL[0]}&longitude=${SCHOOL[1]}&maxradiuskm=2000&minmagnitude=2.5`),
+    // near = ทั้งเอเชีย (กรอบเดียวกับ ASIA ใน /quake/index.html) · เตือนยังกรอง 1,500 กม. ด้านล่าง
+    getText(`${USGS}&starttime=${since}&minlatitude=-12&maxlatitude=60&minlongitude=25&maxlongitude=160&minmagnitude=2.5`),
     getText(`https://www.seismicportal.eu/fdsnws/event/1/query?format=json&lat=${SCHOOL[0]}&lon=${SCHOOL[1]}&maxradius=18&starttime=${since}&minmag=2.5&limit=1000`),
     getText(`https://earthquake.usgs.gov/fdsnws/event/1/count?starttime=${yr}-01-01&minmagnitude=6`),
     getText(`${USGS}&starttime=${yr}-01-01&minmagnitude=6`)]);
