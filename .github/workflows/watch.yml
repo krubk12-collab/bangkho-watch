@@ -75,6 +75,14 @@ jobs:
         run: |
           K=https://bangkho.ac.th/keep/api.php
           curl -sf --max-time 20 "$K?action=list" -o /tmp/kl.json && curl -sf --max-time 20 "$K?action=remoteState" -o /tmp/ks.json             && node --import ./govhit.mjs radio.mjs /tmp/kl.json /tmp/ks.json site/w/radio.json
+      - name: oil ping (/oil/ เก็บราคา+โครงสร้างรายวันได้แม้ไม่มีคนเปิดเว็บ ชั่วโมงละครั้ง)
+        continue-on-error: true
+        timeout-minutes: 1
+        run: |
+          if [ "$(date +%M)" -lt 10 ]; then
+            curl -sf --max-time 40 "https://bangkho.ac.th/oil/api.php?a=board" -o /dev/null && echo board ok
+            curl -sf --max-time 40 "https://bangkho.ac.th/oil/api.php?a=structure" -o /dev/null && echo structure ok
+          fi
       - name: water alert (Telegram)
         continue-on-error: true      # เตือนน้ำพลาดต้องไม่ทำให้หน้าสถานะเว็บหยุด
         env:
