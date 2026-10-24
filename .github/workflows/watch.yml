@@ -112,9 +112,7 @@ jobs:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
           OUT_DIR: site
-        run: |
-          command -v ffmpeg >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null)
-          node --import ./govhit.mjs gauge.mjs
+        run: node --import ./govhit.mjs gauge.mjs
       - name: RID daily report (C.29B, every 2h)
         continue-on-error: true
         timeout-minutes: 3

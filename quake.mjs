@@ -1,5 +1,6 @@
 // แผ่นดินไหว → quake.json (หน้า /quake/ อ่าน TMD จากที่นี่ เพราะ RSS กรมอุตุฯ ไม่มี CORS) + Telegram
 // เตือนเมื่อ: M≥4.5 ในรัศมี 1,500 กม. จากโรงเรียน (USGS หรือกรมอุตุฯ) หรือกรมอุตุฯ รายงานจุดศูนย์กลางในประเทศไทย M≥3
+//           หรือ M≥7 ที่ไหนก็ได้ในเอเชีย (กรอบ ASIA — ทิเบต M7.0 22ต.ค.69 ห่าง ~2,300 กม. เคยหลุด)
 // env: OUT_DIR, DRY_RUN=1, TG_TOKEN, TG_CHAT · ทดสอบ: node quake.mjs test
 import fs from 'node:fs';
 
@@ -7,7 +8,10 @@ const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/quake.json`;
 const SITE = 'https://bangkho.ac.th/quake/';
 const SCHOOL = [13.851028, 100.403063];
-const NEAR_KM = 1500, NEAR_M = 4.5, TH_M = 3.0, FRESH_H = 3, KEEP_D = 30;
+const NEAR_KM = 1500, NEAR_M = 4.5, TH_M = 3.0, ASIA_M = 7.0, FRESH_H = 3, KEEP_D = 30;
+// กรอบเดียวกับ ASIA ใน /quake/index.html — แก้ต้องแก้ทั้งสองที่
+const ASIA = {minlatitude: -12, maxlatitude: 60, minlongitude: 25, maxlongitude: 160};
+const inAsia = e => e.lat >= ASIA.minlatitude && e.lat <= ASIA.maxlatitude && e.lon >= ASIA.minlongitude && e.lon <= ASIA.maxlongitude;
 const TMD = 'https://earthquake.tmd.go.th/feed/rss_tmd.xml';
 const USGS = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&orderby=time';
 
@@ -41,7 +45,7 @@ export const same = (a, b) => Math.abs(a.time - b.time) <= 180e3 && km(a.lat, a.
 export const inThai = e => e.src === 'tmd' && !/ประเทศ|ทะเล|หมู่เกาะ|ชายฝั่ง|พรมแดน/.test(e.place);
 export const worth = e => {
   const d = km(SCHOOL[0], SCHOOL[1], e.lat, e.lon);
-  return (e.mag >= NEAR_M && d <= NEAR_KM) || (inThai(e) && e.mag >= TH_M);
+  return (e.mag >= NEAR_M && d <= NEAR_KM) || (inThai(e) && e.mag >= TH_M) || (e.mag >= ASIA_M && inAsia(e));
 };
 
 export function pick(events, sent, now) {
@@ -114,6 +118,8 @@ function test() {
   assert([7, 8].includes(Math.floor(ipe(6.3, 5, 7))), 'ipe near ' + ipe(6.3, 5, 7));
   assert(Math.floor(ipe(7.7, 1000, 10)) === 2 || Math.floor(ipe(7.7, 1000, 10)) === 3, 'ipe far ' + ipe(7.7, 1000, 10));
   assert(message(p[0]).includes('ห่างโรงเรียน'), 'msg');
+  const tibet = {src: 'usgs', mag: 7.0, lat: 31.6, lon: 93.7, time: now, depth: 10};
+  assert(worth(tibet) && !worth({...tibet, mag: 6.9}) && !worth({...tibet, lat: -30}), 'M7+ เอเชีย');
   console.log('quake.mjs test ผ่าน');
 }
 
@@ -128,8 +134,8 @@ async function main() {
   const pageOld = prev.page || {};
   const [rTmd, rNear, rEmsc, rCnt, rYear] = await Promise.allSettled([
     getText(TMD),
-    // near = ทั้งเอเชีย (กรอบเดียวกับ ASIA ใน /quake/index.html) · เตือนยังกรอง 1,500 กม. ด้านล่าง
-    getText(`${USGS}&starttime=${since}&minlatitude=-12&maxlatitude=60&minlongitude=25&maxlongitude=160&minmagnitude=2.5`),
+    // near = ทั้งเอเชีย (กรอบ ASIA) · ใช้ทั้งหน้าเว็บและกรองเตือนด้านล่าง
+    getText(`${USGS}&starttime=${since}&${new URLSearchParams(ASIA)}&minmagnitude=2.5`),
     getText(`https://www.seismicportal.eu/fdsnws/event/1/query?format=json&lat=${SCHOOL[0]}&lon=${SCHOOL[1]}&maxradius=18&starttime=${since}&minmag=2.5&limit=1000`),
     getText(`https://earthquake.usgs.gov/fdsnws/event/1/count?starttime=${yr}-01-01&minmagnitude=6`),
     getText(`${USGS}&starttime=${yr}-01-01&minmagnitude=6`)]);
@@ -141,8 +147,8 @@ async function main() {
   const page = {...pageOld};
   if (rNear.status === 'fulfilled') {
     page.near = JSON.parse(rNear.value).features.map(slimU); page.nearT = now;
-    // เตือน: วันล่าสุด ≥4.5 ใน 1,500 กม. (กรองจากชุดเดียวกัน ไม่ต้องยิง API ซ้ำ)
-    usgs = page.near.map(fromUsgs).filter(e => now - e.time < 864e5 && e.mag >= NEAR_M && km(SCHOOL[0], SCHOOL[1], e.lat, e.lon) <= NEAR_KM);
+    // เตือน: วันล่าสุดที่เข้าเกณฑ์ worth() (กรองจากชุดเดียวกัน ไม่ต้องยิง API ซ้ำ)
+    usgs = page.near.map(fromUsgs).filter(e => now - e.time < 864e5 && worth(e));
   } else errs.push('usgs ' + why(rNear));
   if (rEmsc.status === 'fulfilled') { page.emsc = JSON.parse(rEmsc.value).features.map(slimE); page.emscT = now; } else errs.push('emsc ' + why(rEmsc));
   if (rCnt.status === 'fulfilled' && /^\d+$/.test(rCnt.value.trim())) page.yearCount = {yr, n: +rCnt.value.trim()};
