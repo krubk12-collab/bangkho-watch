@@ -9,7 +9,8 @@ import { pathToFileURL } from 'node:url';
 
 const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/satci.json`;
-const KEEP_S = 14 * 86400;
+const KEEP_S = 120 * 86400;   // เก็บนานให้สถิติ % โอกาสฝน (satcalib.json) มีตัวอย่างพอ ~25KB/สัปดาห์
+const RAIN_DBZ = 30;           // ฝนปานกลางขึ้นไปที่ รร. = "ฝนตกจริง"
 const JMA = 'https://www.jma.go.jp/bosai/himawari/data/satimg/';
 const CX = 236.7, CY = 193.6, R = 13;   // โรงเรียนในแผ่นซูม 5 x=24 y=14
 
@@ -26,6 +27,28 @@ export function satCI(A, B) {
   return {n, km: Math.round(Math.hypot(dx, dy) * 4.75), dir: Math.round(((Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360) / 45) % 8, v};
 }
 
+// 📊 % โอกาสฝนที่ รร. ใน 60 นาที จากสถิติที่จดเอง → satcalib.json ให้ /water/wxcard.js เปิดอ่าน (เกณฑ์สว่างเท่าเดิม แค่บอกโอกาสแทนเตือนเหมารวม)
+// ข้อมูล 15–24ต.ค.69: เตือน 834 ครั้ง ฝนจริง 105 (13%) · ระยะ/เวลาแยกได้ดี (<10 กม. 56% vs ≥40 กม. 6% · บ่าย 27% vs 00-06 น. 3%)
+// ส่วนจำนวนจุด/ความสว่างแยกได้น้อย ไม่ใช้ · ponytail: ตารางนับธรรมดา 4 ระยะ × บ่าย/ไม่บ่าย — ข้อมูลเยอะขึ้นค่อยเพิ่มมิติ
+export const kmBand = km => km < 10 ? 0 : km < 25 ? 1 : km < 40 ? 2 : 3;
+export const pmBand = t => { const h = (new Date(t * 1000).getUTCHours() + 7) % 24; return h >= 12 && h < 18 ? 1 : 0; };
+export function calib(S) {
+  const c = {}, add = (k, hit) => { const x = c[k] ??= [0, 0]; x[0]++; x[1] += hit; };
+  for (const [t, e] of Object.entries(S)) if (e.length === 5) {
+    const hit = e[4] >= RAIN_DBZ ? 1 : 0;
+    if (e[0] < 2) { add('none', hit); continue; }
+    add('k' + kmBand(e[1]), hit); add(kmBand(e[1]) + '|' + pmBand(+t), hit);
+  }
+  // ช่องที่ตัวอย่างน้อย หดเข้าหาค่าของแถบระยะนั้น (A = น้ำหนักค่ากลาง) กัน % แกว่งจากไม่กี่ครั้ง
+  const A = 10, p = {}, pct = (r, n, base) => Math.round(100 * (r + A * base) / (n + A));
+  for (let k = 0; k < 4; k++) {
+    const [n, r] = c['k' + k] || [0, 0], base = (r + 1) / (n + 2);
+    for (const pm of [0, 1]) { const [m, q] = c[k + '|' + pm] || [0, 0]; p[k + '|' + pm] = [pct(q, m, base), m]; }
+  }
+  const [n0, r0] = c.none || [0, 0];
+  return {rain: RAIN_DBZ, p, none: [Math.round(100 * (r0 + 1) / (n0 + 2)), n0]};
+}
+
 const gray = buf => execFileSync('ffmpeg', ['-loglevel', 'error', '-i', 'pipe:0', '-f', 'rawvideo', '-pix_fmt', 'gray', 'pipe:1'], {input: buf, maxBuffer: 1 << 20});
 const tile = f => fetch(`${JMA}${f.basetime}/fd/${f.validtime}/B13/TBB/5/24/14.jpg`, {signal: AbortSignal.timeout(20000)})
   .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); }).then(b => gray(Buffer.from(b)));
@@ -39,6 +62,11 @@ function test() {
   if (r.n !== 3 || r.dir !== 0 || r.km < 40 || r.km > 50 || r.v !== 150) throw new Error('FAIL ' + JSON.stringify(r));
   A[184 * 256 + 237] = 60; B.fill(140);   // สว่างแต่ไม่ได้สว่างขึ้น = เมฆเดิม ไม่นับ
   if (satCI(A, B).n !== 0) throw new Error('FAIL เมฆเดิม');
+  const S = {}, t0 = Date.UTC(2026, 9, 20, 7) / 1000;   // 14:00 น. ไทย = บ่าย
+  for (let i = 0; i < 20; i++) S[t0 + i * 600] = [5, 5, 0, 200, i < 10 ? 40 : 0];   // ใกล้ 10 ใน 20 ฝนตก
+  for (let i = 0; i < 20; i++) S[t0 + 86400 * 1.5 + i * 600] = [5, 60, 0, 200, 0];   // ไกล ตอนกลางคืน ไม่ตกเลย
+  const C = calib(S);
+  if (C.p['0|1'][0] < 40 || C.p['0|1'][0] > 60 || C.p['0|1'][1] !== 20 || C.p['3|0'][0] > 10 || C.p['3|1'][1] !== 0) throw new Error('FAIL calib ' + JSON.stringify(C.p));
   console.log('sat.mjs test ผ่าน');
 }
 
@@ -65,6 +93,8 @@ async function main() {
   const cut = Date.now() / 1000 - KEEP_S;
   for (const t of Object.keys(S)) if (+t < cut) delete S[t];
   fs.writeFileSync(FILE, JSON.stringify(S));
+  const C = calib(S);
+  fs.writeFileSync(`${OUT}/satcalib.json`, JSON.stringify({t: new Date().toISOString(), ...C}));
   const last = Math.max(...Object.keys(S).map(Number));
   console.log(`sat: เฟรมใหม่ ${n} · ล่าสุด ${JSON.stringify(S[last])} · เก็บ ${Object.keys(S).length} เฟรม`);
 }
