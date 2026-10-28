@@ -2,20 +2,20 @@
 // ตัวเลขพยากรณ์ (ฝน/เมฆ/ความกดอากาศ/ลม/พายุฟ้าคะนอง/ฝนสะสม) จาก Open-Meteo ECMWF+GFS · ภาพแผนที่อากาศกรมอุตุฯ + Himawari + ฝนพยากรณ์ สสน.
 // + ระดับเฝ้าระวังจาก assess.js + น้ำขึ้นลงคลอง + เขื่อน + ดาวเทียม GISTDA + ไม้วัด AI + หัวข่าว
 // ผลเป็น "ความเห็นประกอบ" เท่านั้น ไม่ขับระดับเตือนภัย (ระดับยังมาจาก assess.js ที่เดียว)
-// env: AI_HUB_TOKEN, DEEPSEEK_API_KEY, GROQ_API_KEY, OUT_DIR (outlook.json), FORCE=1 (ไม่รอครบ 6 ชม.) · repo สาธารณะ ห้าม print คีย์
+// env: AI_HUB_TOKEN, DEEPSEEK_API_KEY, GROQ_API_KEY, OUT_DIR (outlook.json), FORCE=1 (ไม่รอครบรอบ) · repo สาธารณะ ห้าม print คีย์
 import fs from 'node:fs';
 
 const SITE = 'https://bangkho.ac.th/water/';
 const OUT = process.env.OUT_DIR || '.';
 const FILE = `${OUT}/outlook.json`;
-const EVERY_H = 6;                        // ponytail: ถามทุก 6 ชม. พอ — พยากรณ์ ECMWF/GFS อัปเดตวันละ 2–4 รอบ
+const EVERY_H = 12;                       // 28ต.ค.69 ลูกพี่สั่งลดจาก 6 → 12 ชม. ประหยัด DeepSeek
 // 💸 11ต.ค.69 ย้ายจาก Gemini Pro → DeepSeek (ถูกกว่ามาก) สำรองด้วย Groq ฟรี · ทั้งคู่อ่านภาพไม่ได้ → ตัดภาพแผนที่อากาศออก ใช้ตัวเลขพยากรณ์ล้วน
 // ai-hub มาก่อน (นับโทเค็นให้ /apihub) · hub ล่มก็ตกไปเรียกค่ายตรงด้วยคีย์เดิม
 const PROVIDERS = [
-  {name: 'hub deepseek-chat', url: 'https://ai-hub.krubk12.workers.dev/v1/chat/completions', key: 'AI_HUB_TOKEN',
-   body: {model: 'deepseek-chat', response_format: {type: 'json_object'}}},
-  {name: 'deepseek-chat', url: 'https://api.deepseek.com/chat/completions', key: 'DEEPSEEK_API_KEY',
-   body: {model: 'deepseek-chat', response_format: {type: 'json_object'}}},
+  {name: 'hub deepseek-flash', url: 'https://ai-hub.krubk12.workers.dev/v1/chat/completions', key: 'AI_HUB_TOKEN',
+   body: {model: 'deepseek-flash', thinking: {type: 'disabled'}, response_format: {type: 'json_object'}}},
+  {name: 'deepseek-flash', url: 'https://api.deepseek.com/chat/completions', key: 'DEEPSEEK_API_KEY',
+   body: {model: 'deepseek-flash', thinking: {type: 'disabled'}, response_format: {type: 'json_object'}}},
   {name: 'groq qwen3.8-27b', url: 'https://api.groq.com/openai/v1/chat/completions', key: 'GROQ_API_KEY',
    body: {model: 'qwen/qwen3.8-27b', response_format: {type: 'json_object'}, reasoning_effort: 'none'}},
 ];
@@ -55,23 +55,6 @@ async function forecast() {
         thunder_hours: v('weather_code').filter(c => c >= 95).length};
     })};
   });
-}
-
-// ภาพที่ AI ดู: แผนที่อากาศผิวพื้น + ลมชั้นบน + ดาวเทียมเมฆ (กรมอุตุฯ/สสน.) + ฝนพยากรณ์ WRF ของ สสน.
-async function images(D) {
-  const picks = [...(D.wmap || []).slice(0, 4).map(w => [w.name, w.img]), ...(D.fc?.th || []).slice(0, 7).map(f => [`ฝนพยากรณ์ สสน. (WRF) ${f.dt}`, f.img])];
-  const out = [];
-  for (const [name, url] of picks) {
-    try {
-      const r = await get(url, 20000);
-      const type = r.headers.get('content-type') || '';
-      if (!r.ok || !type.startsWith('image/')) continue;
-      const b = Buffer.from(await r.arrayBuffer());
-      if (b.length > 4e6) continue;
-      out.push({name, part: {inlineData: {mimeType: type.split(';')[0], data: b.toString('base64')}}});
-    } catch { /* ภาพไหนโหลดไม่ได้ข้ามไป — ตัวเลขยังพอ */ }
-  }
-  return out;
 }
 
 async function context() {
@@ -143,11 +126,14 @@ async function askAI(prompt) {
   throw last;
 }
 
+// พยากรณ์ส่งเป็นตาราง หัวคอลัมน์ครั้งเดียว ไม่ซ้ำชื่อคีย์ 49 แถว — ลดโทเค็นขาเข้า (28ต.ค.69)
+const table = fc => ({cols: Object.keys(fc[0].days[0]), points: fc.map(p => ({name: p.name, rows: p.days.map(d => Object.values(d))}))});
+
 async function run() {
   const prev = readJson(FILE, null);
   if (process.env.FORCE !== '1' && prev?.t && Date.now() - Date.parse(prev.t) < EVERY_H * 36e5 - 10 * 6e4) { console.log('outlook: ยังไม่ครบรอบ'); return prev; }
   const [ctx, fc] = await Promise.all([context().catch(e => { throw new Error('ข้อมูลน้ำ: ' + (e.cause?.code || e.message)); }), forecast().catch(e => { throw new Error('พยากรณ์: ' + (e.cause?.code || e.message)); })]);
-  const v = await askAI(PROMPT + '\n\nข้อมูลสถานการณ์ปัจจุบัน:\n' + JSON.stringify(ctx.text) + '\n\nตัวเลขพยากรณ์รายวัน 7 วัน:\n' + JSON.stringify(fc));
+  const v = await askAI(PROMPT + '\n\nข้อมูลสถานการณ์ปัจจุบัน:\n' + JSON.stringify(ctx.text) + '\n\nตัวเลขพยากรณ์รายวัน 7 วัน (ตาราง: cols = ชื่อคอลัมน์ของแต่ละแถวใน rows):\n' + JSON.stringify(table(fc)));
   // ระดับรายวันต้องอยู่ 0–3 และวันแรกไม่ต่ำกว่าระดับที่สูตรคิดตอนนี้ (AI ห้ามบอกว่าปลอดภัยกว่าข้อมูลจริง)
   const W = globalThis.WaterAssess, now = W.NAMES.indexOf(ctx.text.level_by_formula);
   v.days = v.days.slice(0, 7).map((d, i) => ({...d, risk: Math.max(0, Math.min(3, Math.round(+d.risk || 0)), i === 0 ? now : 0)}));

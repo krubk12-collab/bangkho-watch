@@ -175,7 +175,7 @@ jobs:
           cd fclog && git add -A
           git -c user.name=bangkho-watch -c user.email=actions@users.noreply.github.com commit -qm "fclog $(TZ=Asia/Bangkok date '+%F %H:%M')"
           git push -q "$U" fclog
-      - name: 7-day outlook (AI DeepSeek/Groq, every 6h)
+      - name: 7-day outlook (AI DeepSeek/Groq, every 12h)
         continue-on-error: true
         timeout-minutes: 5
         env:
