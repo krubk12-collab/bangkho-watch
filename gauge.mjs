@@ -1,6 +1,6 @@
 // อ่านไม้วัดระดับน้ำจากกล้อง CCTV (ท่าน้ำนนท์ + ท่าน้ำปากเกร็ด) ด้วย Gemini แล้วเก็บเป็นกราฟ + แจ้ง Telegram
 // ขั้นตอน: ffmpeg ดึง 1 เฟรมจากสตรีม → ครอปเฉพาะไม้วัด ขยาย 3 เท่า → Gemini ตอบ JSON → กรองค่าที่ไม่น่าเชื่อ
-// env: AI_HUB_GAUGE, GEMINI_FREE_KEY, GEMINI_API_KEY, CAM_KEY, TG_TOKEN, TG_CHAT, OUT_DIR (<file>.json + <file>.jpg ต่อกล้อง), DRY_RUN=1 (ไม่ส่ง Telegram)
+// env: AI_HUB_GAUGE, GEMINI_API_KEY, CAM_KEY, TG_TOKEN, TG_CHAT, OUT_DIR (<file>.json + <file>.jpg ต่อกล้อง), DRY_RUN=1 (ไม่ส่ง Telegram)
 // repo สาธารณะ → ห้าม print คีย์/เนื้อหาข้อความลง log
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -69,32 +69,40 @@ async function grab(c) {
 
 // ai-hub (ใช้คีย์โปรเจกต์ฟรีฝั่ง hub + นับโทเค็นให้ /apihub) → คีย์ฟรีตรง → คีย์เสียเงิน · ขั้นไหนใช้ไม่ได้ก็ตกขั้นถัดไปถาวรในรอบนี้
 // คีย์ฟรี (ไม่ผูกบัตร, 15ต.ค.69): ภาพไม้วัดเป็นกล้องสาธารณะ ระดับฟรี Google เอาไปเทรนได้ไม่เป็นไร · ห้ามเอาคีย์ฟรีไปใช้กับข้อมูลครู/นักเรียน
-const GEN = 'v1beta/models/gemini-flash-latest:generateContent';
-const tiers = [['https://ai-hub.krubk12.workers.dev/gemini/', process.env.AI_HUB_GAUGE, 'hub'],
-  ['https://generativelanguage.googleapis.com/', process.env.GEMINI_FREE_KEY, 'คีย์ฟรี'],
-  ['https://generativelanguage.googleapis.com/', process.env.GEMINI_API_KEY, 'คีย์เสียเงิน']].filter(t => t[1]);
-async function ask(c, imgs, n = 0) {
-  const [base, key, name] = tiers[0];
-  let r;
-  try {
-    r = await fetch(base + GEN, {
-      method: 'POST', headers: {'content-type': 'application/json', 'x-goog-api-key': key}, signal: name === 'hub' ? AbortSignal.timeout(150000) : undefined,   // Gemini ฟรีตอบช้า ~75 วิ (18ต.ค.)
-      body: JSON.stringify({contents: [{parts: [{text: c.prompt + ' ' + JSON_ASK}, ...imgs.map(data => ({inlineData: {mimeType: 'image/png', data}}))]}],
-        // thinkingLevel low: ทดสอบ 11ต.ค.69 อ่านค่าเท่าค่าเริ่มต้น (ปทุมฯ 2.68-2.70 / 2.69) แต่โทเค็นคิด (คิดเงินราคาขาออก) ลด ~1,100-3,000 → ~550-1,200 · minimal รุ่นนี้ไม่รองรับ
-        generationConfig: {responseMimeType: 'application/json', temperature: 0, thinkingConfig: {thinkingLevel: 'low'}}})});
-  } catch (e) {
-    if (tiers.length > 1) { console.log(`${name} ต่อไม่ติด (${e.name}) ใช้ขั้นถัดไป`); tiers.shift(); return ask(c, imgs, n); }
-    throw e;
+// 28ต.ค.69 หมุนรุ่นบนโควตาฟรี (นับแยกรายรุ่น วันละ 20) 3.8→3.7→3.6 แล้วจบที่คีย์เสียเงิน
+// ผลทดสอบ 15ต.ค.: 3.7=3.8 ทุกกรณี · 3.6 รอง · 3 Flash อ่านถูกแค่ปทุม (นนท์เดาผิดตอนผักตบบัง) · 2.5/Lite ตัดออก
+// 26–28ต.ค. คีย์ฟรี 3.8 ค้างไม่ตอบ / 3.7 ตอบ 503 → รอบเดิมรอ 150 วิ เกินเวลาขั้น workflow อ่านไม่ได้ทั้ง 3 กล้อง
+// ใช้คีย์ฟรีผ่าน hub เท่านั้น (โปรเจกต์เดียว) ไม่ใช้ GEMINI_FREE_KEY ตรงอีกแล้ว — ไม่ไล่รวมโควตาหลายโปรเจกต์
+const HUB = 'https://ai-hub.krubk12.workers.dev/gemini/', GOOGLE = 'https://generativelanguage.googleapis.com/';
+const routes = c => [
+  ...(process.env.AI_HUB_GAUGE ? ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', ...(c.id === 'pathum' ? ['gemini-3-flash-preview'] : [])]
+    .map(m => [HUB, process.env.AI_HUB_GAUGE, m, 'ฟรี']) : []),
+  ...(process.env.GEMINI_API_KEY ? [[GOOGLE, process.env.GEMINI_API_KEY, 'gemini-flash-latest', 'เสียเงิน']] : [])];
+const dead = new Set();   // รุ่นที่พังในรอบนี้ ไม่ลองซ้ำกับกล้องถัดไป
+async function ask(c, imgs) {
+  let last = 'ไม่มีคีย์';
+  for (const [base, key, model, tier] of routes(c)) {
+    const id = tier + ':' + model;
+    if (dead.has(id)) continue;
+    try {
+      const r = await fetch(`${base}v1beta/models/${model}:generateContent`, {
+        method: 'POST', headers: {'content-type': 'application/json', 'x-goog-api-key': key}, signal: AbortSignal.timeout(tier === 'ฟรี' ? 45000 : 90000),
+        body: JSON.stringify({contents: [{parts: [{text: c.prompt + ' ' + JSON_ASK}, ...imgs.map(data => ({inlineData: {mimeType: 'image/png', data}}))]}],
+          // thinkingLevel low: ทดสอบ 11ต.ค.69 อ่านค่าเท่าค่าเริ่มต้น แต่โทเค็นคิดลด ~1,100-3,000 → ~550-1,200 · minimal ไม่รองรับ
+          generationConfig: {responseMimeType: 'application/json', temperature: 0, thinkingConfig: {thinkingLevel: 'low'}}})});
+      const j = await r.json();
+      const t = j.candidates?.[0]?.content?.parts?.map(p => p.text).join('');
+      if (!t) throw new Error(String(j.error?.code || r.status));
+      const v = JSON.parse(t);
+      console.log(`${c.id}: ${model} (${tier})`);
+      return Array.isArray(v) ? v[0] : v;
+    } catch (e) {
+      last = `${model} ${e.name === 'TimeoutError' ? 'ค้าง' : e.message}`;
+      console.log(`${c.id}: ${tier} ${last} → รุ่นถัดไป`);
+      dead.add(id);
+    }
   }
-  const j = await r.json();
-  const t = j.candidates?.[0]?.content?.parts?.map(p => p.text).join('');
-  if (!t && tiers.length > 1 && ([400, 401, 403, 429].includes(r.status) || (name === 'hub' && r.status >= 500))) {
-    console.log(`${name} ใช้ไม่ได้ (${r.status}) ใช้ขั้นถัดไป`); tiers.shift(); return ask(c, imgs, n); }
-  // 503/500 = Google โหลดเต็มชั่วคราว ลองใหม่อีก 2 ครั้งห่าง 20 วิ (429 โควตาเต็ม ลองซ้ำไม่ช่วย)
-  if (!t && r.status >= 500 && n < 2) { await new Promise(s => setTimeout(s, 20000)); return ask(c, imgs, n + 1); }
-  if (!t) throw new Error('gemini ' + (j.error?.code || r.status));
-  const v = JSON.parse(t);
-  return Array.isArray(v) ? v[0] : v;
+  throw new Error('gemini ' + last);
 }
 
 // สถานีปากเกร็ด สสน. (สะพานนวลฉวี) ใช้เช็คว่าค่าที่ AI อ่านไม่หลุดโลก
